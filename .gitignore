@@ -1,0 +1,33 @@
+# Credenciales y secretos
+.env
+.env.local
+*.key
+*.crt
+passwd
+flows_cred.json
+
+# Compilación
+build/
+*.o
+*.elf
+.pio/
+
+# Dependencies
+node_modules/
+venv/
+__pycache__/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Datos
+backups/*.db
+*.log
+temp/
