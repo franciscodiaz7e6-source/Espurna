@@ -1,3 +1,11 @@
+# Credenciales y secretos
+.env
+.env.local
+*.key
+*.crt
+passwd
+flows_cred.json
+
 # Compilación
 build/
 *.o
