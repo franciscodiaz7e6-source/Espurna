@@ -61,7 +61,7 @@ services:
     networks:
       - iot-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8086/api/v2/ready"]
+      test: ["CMD", "curl", "-f", "-H", "Authorization: Token ${INFLUXDB_ADMIN_TOKEN}", "http://localhost:8086/api/v2/ready"]
       interval: 30s
       timeout: 10s
       retries: 3
