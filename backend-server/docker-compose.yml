@@ -96,9 +96,10 @@ services:
       - iot-network
     depends_on:
       mosquitto:
-        condition: service_healthy
+        condition: service_started
       influxdb:
-        condition: service_healthy
+        condition: service_started
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:1880/"]
       interval: 30s
