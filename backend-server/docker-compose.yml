@@ -10,31 +10,26 @@ services:
     restart: unless-stopped
     hostname: mqtt-broker
     ports:
-      - "80:8883"
-    # Por limitaciones del bastion que tiene IsardVDI tenemos que redirigir el puerto del MQTT al 80 en la maquina host
+      - "80:8883"   # Puerto 80 en host → 8883 en contenedor (limitación IsardVDI)
     volumes:
       - ./mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - ./mqtt/certs:/mosquitto/certs:ro
+      - ./mqtt/certs:/mosquitto/certs          # ← Removido :ro
       - ./mqtt/passwd:/mosquitto/config/passwd
       - mosquitto-data:/mosquitto/data
       - mosquitto-logs:/mosquitto/log
-      
     environment:
       - TZ=Europe/Madrid
     networks:
       - iot-network
-    # Red personalizada para comunicarse con los demas servicios
     healthcheck:
       test: ["CMD", "mosquitto_sub", "-h", "localhost", "-t", "test", "-C", "1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
-    # Verifica cada 30 segundos que el broker funciona correctamente
-    # mosquitto_sub intenta conectarse al broker (localhost)
-    # Si falla 3 veces consecutivas, marca el contenedor como unhealthy
     labels:
       - "MQTT_Server_EspVRna"
+
 
   # ============================================
   # INFLUXDB - TIME SERIES DATABASE
