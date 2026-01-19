@@ -19,7 +19,7 @@ services:
       # Certificados TLS/SSL para conexiones seguras (solo lectura)
       - ./mqtt/passwd:/mosquitto/config/passwd:ro
       # Archivo de contraseñas para autenticación (solo lectura)
-      - mosquitto-data:/mosquitto/data7
+      - mosquitto-data:/mosquitto/data
       # Volumen para datos persistentes
       - mosquitto-logs:/mosquitto/log
       
