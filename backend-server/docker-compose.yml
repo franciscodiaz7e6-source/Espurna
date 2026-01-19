@@ -13,14 +13,10 @@ services:
       - "80:8883"
     # Por limitaciones del bastion que tiene IsardVDI tenemos que redirigir el puerto del MQTT al 80 en la maquina host
     volumes:
-      - ./mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      # Archivo de configuración principal (solo lectura)
+      - ./mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf
       - ./mqtt/certs:/mosquitto/certs:ro
-      # Certificados TLS/SSL para conexiones seguras (solo lectura)
-      - ./mqtt/passwd:/mosquitto/config/passwd:ro
-      # Archivo de contraseñas para autenticación (solo lectura)
+      - ./mqtt/passwd:/mosquitto/config/passwd
       - mosquitto-data:/mosquitto/data
-      # Volumen para datos persistentes
       - mosquitto-logs:/mosquitto/log
       
     environment:
