@@ -10,7 +10,7 @@ services:
     restart: unless-stopped
     hostname: mqtt-broker
     ports:
-      - "80:8883"
+      - "443:8883"
     volumes:
       - ./mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf
       - ./mqtt/certs:/mosquitto/certs
