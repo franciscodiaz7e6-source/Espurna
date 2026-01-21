@@ -30,12 +30,14 @@ EspVRna és un sistema integral de detecció i prevenció d'incendis forestals q
 ## Tecnologies Utilitzades
 
 ### Hardware
+
 - **Microcontrolador:** ESP32-WROOM-32
 - **Sensors:** PIR HC-SR501 (detecció de moviment)
 - **Comunicació:** Meshtastic (LoRa 868MHz)
 - **Energia:** Mini panell solar + bateria LiPo
 
 ### Software
+
 - **Firmware:** Arduino/PlatformIO (C++)
 - **Protocol:** MQTT, LoRaWAN
 - **Cloud:** AWS IoT Core, AWS Lambda
@@ -43,6 +45,7 @@ EspVRna és un sistema integral de detecció i prevenció d'incendis forestals q
 - **Base de Dades:** AWS DynamoDB
 
 ## Estructura del Repositori
+
 ```
 ProjecteEspVRna_IOTs/
 ├── esp32-firmware/          # Codi per ESP32
@@ -60,6 +63,7 @@ ProjecteEspVRna_IOTs/
 ## Requisits Previs
 
 ### Hardware Necessari
+
 - ESP32 DevKit v1
 - Sensor PIR HC-SR501
 - Mòdul Meshtastic (T-Beam o Heltec)
@@ -68,6 +72,7 @@ ProjecteEspVRna_IOTs/
 - Cables Dupont i resistències
 
 ### Software Necessari
+
 - [Arduino IDE](https://www.arduino.cc/en/software) o [PlatformIO](https://platformio.org/)
 - [Python 3.8+](https://www.python.org/)
 - [Node.js 16+](https://nodejs.org/) (per al backend)
@@ -76,12 +81,14 @@ ProjecteEspVRna_IOTs/
 ## Instal·lació
 
 ### 1. Clonar el Repositori
+
 ```bash
 git clone https://github.com/franciscodiaz7e6-source/ProjecteEspVRna_IOTs.git
 cd ProjecteEspVRna_IOTs
 ```
 
 ### 2. Configurar l'ESP32
+
 ```bash
 cd esp32-firmware
 # Si utilitzes PlatformIO
@@ -92,6 +99,7 @@ pio run -t upload
 ```
 
 ### 3. Configurar el Backend
+
 ```bash
 cd backend-server
 npm install
@@ -107,6 +115,7 @@ Consulta la documentació a `docs/meshtastic-setup.md` per configurar els nodes 
 ## Configuració
 
 ### Variables d'Entorn (.env)
+
 ```env
 # AWS Configuration
 AWS_REGION=eu-west-1
@@ -126,6 +135,7 @@ SLEEP_INTERVAL=300
 ### Configuració ESP32
 
 Edita `esp32-firmware/include/config.h`:
+
 ```cpp
 #define WIFI_SSID "your-ssid"
 #define WIFI_PASSWORD "your-password"
@@ -147,11 +157,13 @@ Edita `esp32-firmware/include/config.h`:
 ### Monitoritzar Dades
 
 Accedeix al dashboard web:
+
 ```
 http://your-server-ip:3000/dashboard
 ```
 
 ### Consultar Logs
+
 ```bash
 # Logs del backend
 npm run logs
@@ -161,6 +173,7 @@ pio device monitor
 ```
 
 ## Testing
+
 ```bash
 # Tests unitaris ESP32
 cd esp32-firmware
@@ -172,29 +185,11 @@ npm test
 ```
 
 ## Arquitectura del Sistema
+
 ```
-┌─────────────┐      LoRa       ┌──────────────┐
-│  Sensor PIR │ ────────────────▶│ Meshtastic   │
-│   + ESP32   │                  │   Gateway    │
-└─────────────┘                  └──────┬───────┘
-                                        │ MQTT
-                                        ▼
-                                 ┌──────────────┐
-                                 │  AWS IoT     │
-                                 │     Core     │
-                                 └──────┬───────┘
-                                        │
-                        ┌───────────────┼───────────────┐
-                        ▼               ▼               ▼
-                  ┌──────────┐   ┌──────────┐   ┌──────────┐
-                  │  Lambda  │   │ DynamoDB │   │   S3     │
-                  └────┬─────┘   └──────────┘   └──────────┘
-                       │
-                       ▼
-                ┌─────────────┐
-                │  Dashboard  │
-                │     Web     │
-                └─────────────┘
+
+(PENDIENTE)
+
 ```
 
 ## Contribució
@@ -209,7 +204,7 @@ Les contribucions són benvingudes! Si vols col·laborar:
 
 ## Documentació Addicional
 
-- [Guia de Desplegament](docs/deployment.md)
+- [Guia de Desplegament](docs/001-deployment.md)
 - [Manual d'Usuari](docs/user-manual.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [API Reference](docs/api-reference.md)
@@ -236,7 +231,8 @@ Aquest projecte està llicenciat sota la Llicència MIT - veure el fitxer [LICEN
 ## Contacte
 
 Per preguntes o sugerències sobre el projecte:
-- Email: projecte.espvrna@itb.cat
+
+- Email: <projecte.espvrna@itb.cat>
 - Web: Projecte EspVRna
 
 ---
