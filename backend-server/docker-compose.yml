@@ -3,7 +3,7 @@ services:
   # MQTT BROKER - TLS ACTIVADO
   # ============================================
   mosquitto:
-    image: eclipse-mosquitto:2.0
+    image: eclipse-mosquitto:2.1
     container_name: mqtt-broker
     restart: unless-stopped
     hostname: mqtt-broker
