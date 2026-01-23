@@ -78,17 +78,17 @@ services:
     restart: unless-stopped
     hostname: node-red
     ports:
-      - "1880:1880"   # Web UI + API
+      - "1880:1880"
     environment:
       - NODE_RED_ENABLE_PROJECTS=true
       - NODE_RED_ENABLE_SAFE_MODE=false
       - TZ=Europe/Madrid
-      - NODE_OPTIONS=--max-old-space-size=256  # Limitar memoria
+      - NODE_OPTIONS=--max-old-space-size=256
     volumes:
       - node-red-data:/data
-      - ./node-red/settings.js:/data/settings.js:ro
-      - ./node-red/flows.json:/data/flows.json:ro
-      - ./node-red/flows_cred.json:/data/flows_cred.json:ro
+      - ./node-red/settings.js:/data/settings.js
+      - ./node-red/flows.json:/data/flows.json
+      - ./node-red/flows_cred.json:/data/flows_cred.json
       - ./node-red/package.json:/data/package.json:ro
       - ./node-red/ca.crt:/data/certs/ca.crt:ro
       - ./node-red/server.crt:/data/certs/server.crt:ro
@@ -100,6 +100,13 @@ services:
         condition: service_started
       influxdb:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:1880/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:1880/"]

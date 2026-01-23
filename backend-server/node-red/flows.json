@@ -58,7 +58,7 @@
     "pretty": false,
     "x": 300,
     "y": 100,
-    "wires": [["check-valid-node"]]
+    "wires": [["check-valid-node", "debug-json"]]
   },
   {
     "id": "check-valid-node",
@@ -68,9 +68,7 @@
     "propertyType": "msg",
     "rules": [
       {
-        "t": "regex",
-        "v": "^[0-9]+([.][0-9]+)?$",
-        "vt": "str"
+        "t": "exists"
       }
     ],
     "checkall": "true",
@@ -78,7 +76,7 @@
     "outputs": 1,
     "x": 500,
     "y": 100,
-    "wires": [["influxdb-node"]]
+    "wires": [["influxdb-node", "debug-valid"]]
   },
   {
     "id": "influxdb-node",
@@ -87,7 +85,7 @@
     "measurement": "collserola_sensors",
     "tags": "sensor=collserola",
     "fields": "temperature,humidity,pressure",
-    "timestamp": "timestamp",
+    "timestamp": "",
     "database": "iot",
     "name": "To InfluxDB",
     "x": 700,
@@ -95,9 +93,9 @@
     "wires": []
   },
   {
-    "id": "debug-node",
+    "id": "debug-json",
     "type": "debug",
-    "name": "Debug",
+    "name": "Debug JSON",
     "active": true,
     "tosidebar": true,
     "console": false,
@@ -106,8 +104,24 @@
     "targetType": "msg",
     "statusVal": "",
     "statusType": "auto",
-    "x": 500,
-    "y": 150,
+    "x": 300,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "debug-valid",
+    "type": "debug",
+    "name": "Debug Valid",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 700,
+    "y": 200,
     "wires": []
   }
 ]
