@@ -73,7 +73,7 @@ services:
   # NODE-RED - DATA PROCESSING & DASHBOARD
   # ============================================
   node-red:
-    image: nodered/node-red:latest
+    build: ./node-red
     container_name: node-red
     restart: unless-stopped
     hostname: node-red
