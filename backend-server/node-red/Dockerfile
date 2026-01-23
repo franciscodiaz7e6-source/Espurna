@@ -1,8 +1,8 @@
 FROM nodered/node-red:latest
 
-# Instalar paquetes influxdb
-RUN npm install node-red-contrib-influxdb \
-    node-red-contrib-mqtt-all \
+# Instalar solo paquetes que existen en npm
+RUN npm install \
+    node-red-contrib-influxdb \
     node-red-dashboard
 
 EXPOSE 1880
