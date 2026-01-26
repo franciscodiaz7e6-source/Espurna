@@ -1,134 +1,174 @@
 [
-  {
-    "id": "flow-main-001",
-    "type": "tab",
-    "label": "Flow 1",
-    "disabled": false,
-    "info": "",
-    "env": []
-  },
-  {
-    "id": "mqtt-broker-tls-001",
-    "type": "mqtt-broker",
-    "z": "flow-main-001",
-    "name": "MQTT Broker TLS",
-    "broker": "mqtt-broker",
-    "port": "8883",
-    "clientid": "node-red-iot",
-    "autoConnect": true,
-    "usetls": true,
-    "useSelfSigned": true,
-    "tlsVersion": "tlsv1.2",
-    "cafile": "/data/certs/ca.crt",
-    "certfile": "/data/certs/server.crt",
-    "keyfile": "/data/certs/server.key",
-    "compatMode": true,
-    "keepalive": 60,
-    "cleansession": true
-  },
-  {
-    "id": "influxdb-config-001",
-    "type": "influxdb",
-    "z": "flow-main-001",
-    "hostname": "influxdb",
-    "port": "8086",
-    "database": "iot",
-    "name": "InfluxDB Local"
-  },
-  {
-    "id": "mqtt-in-node-001",
-    "type": "mqtt in",
-    "z": "flow-main-001",
-    "topic": "meshtastic/mesh/collserola/message",
-    "qos": "1",
-    "datatype": "auto",
-    "broker": "mqtt-broker-tls-001",
-    "nl": false,
-    "rap": true,
-    "rh": 0,
-    "name": "MQTT JSON in",
-    "x": 100,
-    "y": 100,
-    "wires": [["parse-json-node-001"]]
-  },
-  {
-    "id": "parse-json-node-001",
-    "type": "json",
-    "z": "flow-main-001",
-    "name": "Parse JSON",
-    "property": "payload",
-    "action": "obj",
-    "pretty": false,
-    "x": 300,
-    "y": 100,
-    "wires": [["check-valid-node-001", "debug-json-001"]]
-  },
-  {
-    "id": "check-valid-node-001",
-    "type": "switch",
-    "z": "flow-main-001",
-    "name": "Check Valid",
-    "property": "payload.temperature",
-    "propertyType": "msg",
-    "rules": [
-      {
-        "t": "exists"
-      }
-    ],
-    "checkall": "true",
-    "repair": false,
-    "outputs": 1,
-    "x": 500,
-    "y": 100,
-    "wires": [["influxdb-node-001", "debug-valid-001"]]
-  },
-  {
-    "id": "influxdb-node-001",
-    "type": "influxdb out",
-    "z": "flow-main-001",
-    "influxdb": "influxdb-config-001",
-    "measurement": "collserola_sensors",
-    "tags": "sensor=collserola",
-    "fields": "temperature,humidity,pressure",
-    "timestamp": "",
-    "database": "iot",
-    "name": "To InfluxDB",
-    "x": 700,
-    "y": 100,
-    "wires": []
-  },
-  {
-    "id": "debug-json-001",
-    "type": "debug",
-    "z": "flow-main-001",
-    "name": "Debug JSON",
-    "active": true,
-    "tosidebar": true,
-    "console": false,
-    "tostatus": false,
-    "complete": "payload",
-    "targetType": "msg",
-    "statusVal": "",
-    "statusType": "auto",
-    "x": 300,
-    "y": 200,
-    "wires": []
-  },
-  {
-    "id": "debug-valid-001",
-    "type": "debug",
-    "z": "flow-main-001",
-    "name": "Debug Valid",
-    "active": true,
-    "tosidebar": true,
-    "console": false,
-    "tostatus": false,
-    "complete": "payload",
-    "targetType": "msg",
-    "statusVal": "",
-    "statusType": "auto",
-    "x": 700,
-    "y": 200,
-    "wires": []
-  }
+    {
+        "id": "flow-main-001",
+        "type": "tab",
+        "label": "Flow 1",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "mqtt-in-node-001",
+        "type": "mqtt in",
+        "z": "flow-main-001",
+        "name": "MQTT JSON in",
+        "topic": "meshtastic/mesh/collserola/message",
+        "qos": "1",
+        "datatype": "auto",
+        "broker": "mqtt-broker-tls-001",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 100,
+        "y": 100,
+        "wires": [
+            [
+                "parse-json-node-001"
+            ]
+        ]
+    },
+    {
+        "id": "parse-json-node-001",
+        "type": "json",
+        "z": "flow-main-001",
+        "name": "Parse JSON",
+        "property": "payload",
+        "action": "obj",
+        "pretty": false,
+        "x": 300,
+        "y": 100,
+        "wires": [
+            [
+                "debug-json-001",
+                "26d8c904d451495f"
+            ]
+        ]
+    },
+    {
+        "id": "influxdb-node-001",
+        "type": "influxdb out",
+        "z": "flow-main-001",
+        "influxdb": "influxdb-config-001",
+        "name": "To InfluxDB",
+        "measurement": "collserola_sensors",
+        "precision": "",
+        "retentionPolicy": "",
+        "database": "iot",
+        "retentionPolicyV18Flux": "",
+        "org": "ProjecteEspVRna",
+        "bucket": "sensor_data",
+        "x": 710,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "debug-json-001",
+        "type": "debug",
+        "z": "flow-main-001",
+        "name": "Debug JSON",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 300,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "debug-valid-001",
+        "type": "debug",
+        "z": "flow-main-001",
+        "name": "Debug Valid",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 700,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "26d8c904d451495f",
+        "type": "function",
+        "z": "flow-main-001",
+        "name": "Validate Data",
+        "func": "if (msg.payload.temperature !== undefined &&\n    msg.payload.humidity !== undefined &&\n    msg.payload.pressure !== undefined) {\n    msg.valid = true;\n} else {\n    msg.valid = false;\n}\nreturn msg;",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 530,
+        "y": 100,
+        "wires": [
+            [
+                "influxdb-node-001"
+            ],
+            [
+                "debug-valid-001"
+            ]
+        ]
+    },
+    {
+        "id": "mqtt-broker-tls-001",
+        "type": "mqtt-broker",
+        "z": "flow-main-001",
+        "name": "MQTT Broker TLS",
+        "broker": "mqtt-broker",
+        "port": "8883",
+        "tls": "",
+        "clientid": "node-red-iot",
+        "autoConnect": true,
+        "usetls": true,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "meshtastic/mesh/collserola/message",
+        "birthQos": "0",
+        "birthPayload": "{\"status\":\"online\",\"timestamp\":\"2026-01-26T12:16:00Z\",\"service\":\"node-red\"}",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "influxdb-config-001",
+        "type": "influxdb",
+        "z": "flow-main-001",
+        "hostname": "influxdb",
+        "port": "8086",
+        "database": "iot",
+        "name": "InfluxDB Local",
+        "usetls": false,
+        "tls": "",
+        "influxdbVersion": "2.0",
+        "url": "http://influxdb:8086",
+        "timeout": "",
+        "rejectUnauthorized": false
+    },
+    {
+        "id": "b2c7e9f975570c91",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "node-red-contrib-influxdb": "0.7.0"
+        }
+    }
 ]
