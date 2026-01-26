@@ -86,10 +86,10 @@ services:
       - NODE_OPTIONS=--max-old-space-size=256
     volumes:
       - node-red-data:/data
+      # ← COMENTAR ESTAS LÍNEAS:
+      # - ./node-red/flows.json:/data/flows.json
+      # - ./node-red/flows_cred.json:/data/flows_cred.json
       - ./node-red/settings.js:/data/settings.js
-      - ./node-red/flows.json:/data/flows.json
-      - ./node-red/flows_cred.json:/data/flows_cred.json
-      - ./node-red/package.json:/data/package.json:ro
       - ./node-red/ca.crt:/data/certs/ca.crt:ro
       - ./node-red/server.crt:/data/certs/server.crt:ro
       - ./node-red/server.key:/data/certs/server.key:ro
@@ -106,8 +106,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    labels:
-      - "NodeRed_Server_EspVRna"
 
   # ============================================
   # CHIRPSTACK (LoRaWAN Network Server)
