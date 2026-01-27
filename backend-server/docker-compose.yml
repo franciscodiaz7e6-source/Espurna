@@ -87,8 +87,8 @@ services:
     volumes:
       - node-red-data:/data
       # ← COMENTAR ESTAS LÍNEAS:
-      # - ./node-red/flows.json:/data/flows.json
-      # - ./node-red/flows_cred.json:/data/flows_cred.json
+      - ./node-red/flows.json:/data/flows.json
+      - ./node-red/flows_cred.json:/data/flows_cred.json
       - ./node-red/settings.js:/data/settings.js
       - ./node-red/ca.crt:/data/certs/ca.crt:ro
       - ./node-red/server.crt:/data/certs/server.crt:ro
