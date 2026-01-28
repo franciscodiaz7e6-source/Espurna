@@ -39,7 +39,7 @@ services:
     restart: unless-stopped
     hostname: influxdb
     ports:
-      - 8086:8086
+      - "8086:8086"
     environment:
       # Inicialización (documentacion sobre las varibles en /database/READ.ME)
       - DOCKER_INFLUXDB_INIT_MODE=setup
@@ -65,7 +65,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
     labels:
       - "InfluxDB_Server_EspVRna"
 
@@ -103,6 +102,44 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  # ============================================
+  # GRAFANA - VISUALIZACIÓN DE DATOS
+  # ============================================
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: grafana
+    restart: unless-stopped
+    hostname: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      # Configuración básica
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_INSTALL_PLUGINS=
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - TZ=Europe/Madrid
+      # Configuración de datasources automática
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - iot-network
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "Grafana_Dashboard_EspVRna"
 
   # ============================================
   # CHIRPSTACK (LoRaWAN Network Server)
@@ -180,8 +217,12 @@ volumes:
   node-red-data:
     driver: local
   
+  # Grafana
+  grafana-data:
+    driver: local
+  
   # ChirpStack
   # chirpstack-data:
-  #   driver: local.
+  #   driver: local
   # postgres-data:
   #   driver: local
