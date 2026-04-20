@@ -1,0 +1,82 @@
+services:
+  chirpstack-mqtt:
+    image: eclipse-mosquitto:2.0
+    container_name: chirpstack-mqtt
+    restart: unless-stopped
+    ports:
+      - "1884:1883"
+    volumes:
+      - ./chirpstack-mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    networks:
+      - lorawan-net
+      - shared-net
+
+  chirpstack:
+    image: chirpstack/chirpstack:4
+    container_name: chirpstack
+    command: --config /etc/chirpstack
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./chirpstack:/etc/chirpstack
+    environment:
+      - TZ=Europe/Madrid
+    networks:
+      - lorawan-net
+      - shared-net
+      - backend-server_iot-network
+    depends_on:
+      - postgres
+      - redis
+      - chirpstack-mqtt
+  chirpstack-rest-api:
+    image: chirpstack/chirpstack-rest-api:4
+    container_name: chirpstack-rest-api
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    command: --server chirpstack:8080 --bind 0.0.0.0:8090 --insecure
+    networks:
+      - lorawan-net
+      - shared-net
+    depends_on:
+      - chirpstack
+
+  postgres:
+    image: postgres:14-alpine
+    container_name: chirpstack-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=chirpstack
+      - POSTGRES_USER=chirpstack
+      - POSTGRES_PASSWORD=chirpstack_espurna
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - lorawan-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: chirpstack-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - lorawan-net
+
+networks:
+  lorawan-net:
+    driver: bridge
+  shared-net:          # ← añadir como externa
+    external: true
+  backend-server_iot-network:
+    external: true
+
+volumes:
+  postgres-data:
+    external: true
+    name: lorawan-gateway_postgres-data
+  redis-data:
+    external: true
+    name: lorawan-gateway_redis-data

@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FireSense</title>
+<link rel="icon" type="image/png" href="favicon.png?v=5">
+<link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;600;700;800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; overflow-x: hidden; }
+  body { font-family: 'Raleway', sans-serif; background: #020d1f; color: #1a2e1a; overflow-x: hidden; }
+
+  /* NAV */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 48px; height: 72px;
+    background: rgba(255,255,255,0.93);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(0,0,0,0.07);
+  }
+  .nav-logo {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 800; font-size: 1.15rem; color: #0d3b1e;
+    text-decoration: none; letter-spacing: -.01em;
+  }
+  .nav-logo img { width: 26px; height: 26px; }
+  .nav-links { display: flex; gap: 36px; list-style: none; }
+  .nav-links a { font-size: 1rem; font-weight: 700; color: #0d5c2e; text-decoration: none; letter-spacing: .02em; transition: color .2s; }
+  .nav-links a:hover { color: #000; }
+  .nav-cta {
+    background: #0d5c2e; color: #fff; padding: 10px 24px;
+    font-size: .85rem; font-weight: 700; border: none; cursor: pointer;
+    border-radius: 4px; text-decoration: none; letter-spacing: .04em;
+    transition: background .2s;
+  }
+  .nav-cta:hover { background: #083d1e; }
+
+  /* HERO */
+  .hero {
+    position: relative; width: 100%; height: 98vh; min-height: 600px;
+    overflow: hidden; display: flex; align-items: center; padding: 72px 0 0 10%;
+    clip-path: inset(0);
+  }
+  .hero-video {
+    position: absolute; inset: 0; width: 100% !important; height: 100% !important;
+    object-fit: cover; z-index: 0; object-position: center center;
+    transform: scaleX(1.25); filter: contrast(1.1) saturate(1.15) brightness(1.05);
+  }
+  .hero-overlay {
+    position: absolute; inset: 0; z-index: 1;
+    background: linear-gradient(100deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.10) 25%, rgba(255,255,255,0.0) 45%, transparent 100%);
+  }
+  .hero-wave { position: absolute; bottom: -2px; left: 0; right: 0; z-index: 2; line-height: 0; }
+  .hero-wave svg { display: block; width: 100%; }
+  .hero-content { position: relative; z-index: 3; max-width: 500px; animation: fadeUp .9s ease both; }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(30px)} to{opacity:1;transform:translateY(0)} }
+  .hero-tag { font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: .2em; color: #ffffff; text-shadow: 0 2px 12px rgba(0,0,0,0.5); margin-bottom: 20px; text-shadow: 0 1px 6px rgba(0,0,0,0.4); display: block; text-transform: uppercase; }
+  .hero-title { font-family: 'Times New Roman', Times, serif; font-size: clamp(2.4rem, 5vw, 3.8rem); font-weight: 800; color: #0a1f0a; line-height: 1.08; letter-spacing: -.02em; margin-bottom: 20px; text-shadow: 0 1px 8px rgba(0,0,0,0.25); }
+  .hero-title span { color: #a7f3d0; text-shadow: 0 2px 10px rgba(0,0,0,0.4); }
+  .hero-sub { font-family: 'Share Tech Mono', monospace; font-size: 1.02rem; font-weight: 400; color: #fff; line-height: 1.72; margin-bottom: 36px; max-width: 400px; text-shadow: 0 1px 6px rgba(0,0,0,0.4); }
+  .hero-btn { display: inline-flex; align-items: center; gap: 10px; background: #fff; color: #0d5c2e; border: 2px solid #0d5c2e; padding: 14px 32px; font-size: .9rem; font-weight: 700; letter-spacing: .04em; text-decoration: none; border-radius: 4px; transition: background .2s, color .2s, transform .15s, box-shadow .2s; font-family: 'Raleway', sans-serif; }
+  .hero-btn:hover { background: #0d5c2e; color: #fff; transform: translateY(-2px); box-shadow: 0 8px 24px rgba(13,92,46,0.25); }
+  .hero-btn svg { width: 16px; height: 16px; transition: transform .2s; }
+  .hero-btn:hover svg { transform: translateX(3px); }
+
+  /* DIVIDERS - consistent style */
+  .sdivider {
+    background: #fff; padding: 20px 8%;
+    display: flex; align-items: center; gap: 32px;
+  }
+  .sdivider .sline { flex: 1; height: 1px; background: linear-gradient(to right, transparent, #dce8dc); }
+  .sdivider .sline.rev { background: linear-gradient(to left, transparent, #dce8dc); }
+  .sdivider a { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+  .sdivider span { font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: .25em; color: #0d5c2e; text-transform: uppercase; }
+
+  /* ABOUT */
+  #about { padding: 0; overflow: hidden; max-width: 100%; }
+  .about-hero-img { width: 100%; height: 680px; position: relative; overflow: hidden; background: url("https://images.unsplash.com/photo-1511497584788-876760111969?w=1800&q=90") center/cover; background-attachment: fixed; }
+  .about-hero-img img { display: none; width: 100%; height: 100%; object-fit: cover; object-position: center 40%; filter: brightness(0.82) saturate(1.1); transform: scale(1.1); transition: transform 8s ease; animation: kenburnsImg 25s ease-in-out infinite alternate; }
+  @keyframes kenburnsImg { from { transform: scale(1.1) translateY(-3%); } to { transform: scale(1.18) translateY(3%); } }
+  .about-hero-img:hover img { transform: scale(1.0); }
+  .about-hero-img::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0,0,0,0.05) 20%, rgba(10,31,10,0.75) 70%, rgba(10,31,10,0.92) 100%); }
+  .about-hero-caption { position: absolute; bottom: 0; left: 0; right: 0; z-index: 2; padding: 48px 8% 52px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 48px; align-items: end; }
+  .about-hero-caption h2 { font-family: 'Times New Roman', Times, serif; font-size: clamp(1.6rem, 2.4vw, 2.2rem); font-weight: 800; color: #fff; line-height: 1.1; letter-spacing: -.02em; }
+  .about-hero-caption h2 em { font-style: normal; color: #a7f3d0; text-shadow: 0 2px 10px rgba(0,0,0,0.4); }
+  .caption-desc { font-size: .93rem; color: rgba(255,255,255,0.92); text-shadow: 0 1px 8px rgba(0,0,0,0.5); line-height: 1.78; font-weight: 400; border-left: 2px solid #4ade80; padding-left: 18px; }
+  .caption-mission { font-size: .93rem; color: rgba(255,255,255,0.72); line-height: 1.78; font-weight: 400; border-left: 2px solid rgba(255,255,255,0.2); padding-left: 18px; }
+
+  .about-stats { background: #0d5c2e; display: grid; grid-template-columns: repeat(4, 1fr); }
+  .about-stat { padding: 32px 40px; border-right: 1px solid rgba(255,255,255,0.12); text-align: center; }
+  .about-stat:last-child { border-right: none; }
+  .about-stat-val { font-family: 'Share Tech Mono', monospace; font-size: 2.4rem; font-weight: 700; color: #fff; display: block; letter-spacing: -.02em; }
+  .about-stat-val span { color: #a7f3d0; text-shadow: 0 2px 10px rgba(0,0,0,0.4); }
+  .about-stat-lab { font-size: .72rem; font-weight: 600; color: rgba(255,255,255,0.6); letter-spacing: .12em; text-transform: uppercase; margin-top: 6px; display: block; }
+
+  .stag { font-family: 'Share Tech Mono', monospace; font-size: 12px; letter-spacing: .22em; color: #0d5c2e; text-transform: uppercase; margin-bottom: 14px; display: block; }
+  .stitle { font-size: clamp(1.8rem, 3.5vw, 2.8rem); font-weight: 800; color: #0a1f0a; line-height: 1.1; letter-spacing: -.02em; margin-bottom: 18px; }
+
+  .tech-list { list-style: none; display: flex; flex-direction: column; gap: 14px; }
+  .tech-list li { display: flex; align-items: flex-start; gap: 12px; font-size: .95rem; color: #2a3a2a; line-height: 1.5; }
+  .tech-list li::before { content: '→'; font-family: 'Share Tech Mono', monospace; color: #0d5c2e; font-size: .85rem; margin-top: 2px; flex-shrink: 0; }
+
+  /* TECH */
+  .tech-bg { background: linear-gradient(135deg, rgba(2,13,31,0.25) 0%, rgba(10,42,74,0.20) 100%), url("forest-bg.jpg") center/cover no-repeat; padding: 90px 8% 96px;  background-attachment: fixed; }
+  @keyframes kenburns { from { background-size: 110% auto; background-position: center top; } to { background-size: 125% auto; background-position: center bottom; } }
+  .tech-inner { max-width: 1400px; margin: 0 auto; }
+  .tech-bg .stag { color: #00cfff; }
+  .tech-bg .stitle { color: #fff; }
+  .cards { display: grid; grid-template-columns: repeat(3,1fr); gap: 2px; margin-top: 56px; background: rgba(255,255,255,0.05); }
+  .card { background: rgba(5,25,55,0.7); border-top: 2px solid rgba(0,160,255,0.5); border: 1px solid rgba(0,160,255,0.15); padding: 36px 32px; transition: background .2s, transform .2s; }
+  .card:hover { background: rgba(10,50,110,0.9); transform: translateY(-3px); }
+  .card-icon { width: 44px; height: 44px; color: #38d9ff; margin-bottom: 18px; }
+  .card h3 { font-size: .75rem; font-weight: 700; letter-spacing: .12em; color: #00cfff; margin-bottom: 10px; text-transform: uppercase; }
+  .card p { font-size: .93rem; color: rgba(255,255,255,0.6); line-height: 1.65; }
+
+  /* NODES */
+  .nodes-dark { background: #051205; position: relative; padding: 96px 8%; position: relative; overflow: hidden; }
+  .nodes-dark::before { content: ''; position: absolute; top: -200px; right: -200px; width: 600px; height: 600px; background: radial-gradient(circle, rgba(13,92,46,0.3) 0%, transparent 70%); }
+  .nodes-inner { max-width: 1400px; margin: 0 auto; position: relative; z-index: 1; width: 100%; padding: 96px 0; }
+  .nodes-dark .stag { color: #a7f3d0; text-shadow: 0 2px 10px rgba(0,0,0,0.4); }
+  .nodes-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-top: 56px; }
+  .ncard { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); padding: 24px 20px; border-radius: 4px; border-top: 2px solid #0d5c2e; }
+  .ndot { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 8px #4ade80; margin-bottom: 14px; animation: blink 2.5s ease-in-out infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .nid { font-family:'Share Tech Mono',monospace; font-size:10px; letter-spacing:.15em; color:#4ade80; margin-bottom:8px; display:block; }
+  .nname { font-size:.93rem; font-weight:700; color:#fff; margin-bottom:4px; }
+  .ntech { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(255,255,255,0.35); letter-spacing:.1em; }
+  .nodes-cta { text-align:center; margin-top:56px; }
+  .nodes-btn { display:inline-flex; align-items:center; gap:10px; background:#fff; color:#0d5c2e; border:2px solid #0d5c2e; padding:16px 40px; font-size:.9rem; font-weight:700; letter-spacing:.06em; text-decoration:none; border-radius:4px; transition:background .2s,transform .15s,box-shadow .2s; font-family:'Raleway',sans-serif; }
+  .nodes-btn:hover { background:#0d5c2e; color:#fff; transform:translateY(-2px); box-shadow:0 8px 30px rgba(13,92,46,0.4); }
+  .nodes-btn svg { width:16px; height:16px; transition:transform .2s; }
+  .nodes-btn:hover svg { transform:translateX(3px); }
+
+  /* FOOTER */
+  footer { background: #f0f0ee; padding: 20px 8%; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; border-top: 1px solid rgba(255,255,255,0.06); }
+  .flogo { font-weight:800; font-size:1.1rem; color:#0a1f0a; }
+  .flogo span { color:#0d5c2e; }
+  .fmeta { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:.15em; color:rgba(0,0,0,0.4); text-align:right; }
+
+  @media(max-width:900px){
+    .about-hero-caption { grid-template-columns: 1fr; gap: 24px; }
+    .about-stats { grid-template-columns: repeat(2,1fr); }
+    .cards{grid-template-columns:1fr 1fr;}
+    .nodes-grid{grid-template-columns:1fr 1fr;}
+    nav{padding:0 24px;}
+    .nav-links{display:none;}
+    .hero{padding:72px 0 0 6%;}
+  }
+  @media(max-width:600px){
+    .about-stats { grid-template-columns: 1fr 1fr; }
+    .about-hero-img { height: 400px; }
+    .cards,.nodes-grid{grid-template-columns:1fr;}
+    footer{flex-direction:column;text-align:center;}
+    .fmeta{text-align:center;}
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="home.html" class="nav-logo">
+    <img src="favicon.png" alt="FireSense">
+    FireSense
+  </a>
+  <div style="flex:0.9"></div>
+  <ul class="nav-links">
+    <li><a href="#about-img">About</a></li>
+    <li><a href="#tech">Tecnologies</a></li>
+    <li><a href="#nodes">Nodes</a></li>
+  </ul>
+  <a href="https://github.com/AdrianoCalderon-ITB2425/FireSense" class="nav-cta">Accedir al Github →</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <video class="hero-video" autoplay muted loop playsinline
+    poster="https://images.unsplash.com/photo-1448375240586-882707db888b?w=1920&q=80">
+    <source src="forest_hq.mp4" type="video/mp4">
+  </video>
+  <img src="logo-itb.png" id="itb-logo" style="position:absolute;top:95px;right:20px;z-index:3;width:110px;opacity:0.9;filter:brightness(0) invert(1) drop-shadow(0 2px 20px rgba(0,0,0,1)) drop-shadow(0 0 15px rgba(0,0,0,1));">
+  <div class="hero-overlay"></div>
+  <div class="hero-content">
+    <span class="hero-tag">Institut Tecnològic de Barcelona · Parc de Collserola</span>
+    <h1 class="hero-title">Prevenció<br>d'incendis<br><span>en temps real</span></h1>
+    <p class="hero-sub">FireSense monitora el Parc de Collserola amb sensors IoT LoRa per detectar riscos d'incendi forestal de manera ultra-precoç.</p>
+    <a href="index.html" class="hero-btn">
+      Accedir al mapa en viu
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+    </a>
+  </div>
+  <div class="hero-wave">
+    <svg viewBox="0 0 1440 80" preserveAspectRatio="none" fill="#ffffff">
+      <path d="M0,40 C360,80 1080,0 1440,40 L1440,80 L0,80 Z"/>
+    </svg>
+  </div>
+</section>
+
+<div style="height:80px;background:#fff;"></div>
+<!-- DIVIDER → MISSIÓ -->
+<div class="sdivider">
+  <div class="sline"></div>
+  <a href="#about-img">
+    <span>// About FireSense</span>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0d5c2e" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+  </a>
+  <div class="sline rev"></div>
+</div>
+
+<!-- ABOUT -->
+<div id="about">
+  <div class="about-hero-img" style="scroll-margin-top: 130px;" id="about-img"><div style="position:absolute;top:0;left:0;right:0;z-index:3;text-align:center;padding:56px 8% 0;"><p style="font-family:Times New Roman,serif;font-size:clamp(1.6rem,2.5vw,2.4rem);font-weight:300;letter-spacing:.02em;color:#fff;line-height:1.5;text-shadow:0 2px 12px rgba(0,0,0,0.5);"><em style="font-style:italic;color:#4ade80;">The forest</em> cannot wait.<br>Neither <em style="font-style:italic;color:#4ade80;">can we.</em></p></div>
+    <img src="https://images.unsplash.com/photo-1511497584788-876760111969?w=1800&q=90" alt="Parc de Collserola">
+    <div class="about-hero-caption" style="grid-template-columns: 1fr 1fr 1fr; align-items: end; gap: 40px;">
+      <div>
+        <div style="width:48px;height:48px;background:rgba(74,222,128,0.15);border:1px solid rgba(74,222,128,0.3);border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:16px;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="1.8"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M12 6v6l4 2"/></svg>
+        </div>
+        <div style="font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:.2em;color:#4ade80;text-transform:uppercase;font-weight:700;margin-bottom:10px;">La nostra història</div>
+        <p style="font-size:.9rem;color:rgba(255,255,255,0.8);line-height:1.7;font-weight:400;">Nascut a l'Institut Tecnològic de Barcelona, FireSense és un projecte acadèmic que aplica tecnologia IoT real per resoldre un problema crític: la detecció ultra-precoç d'incendis forestals al Parc de Collserola.</p>
+      </div>
+      <div>
+        <div style="width:48px;height:48px;background:rgba(74,222,128,0.15);border:1px solid rgba(74,222,128,0.3);border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:16px;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div style="font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:.2em;color:#4ade80;text-transform:uppercase;font-weight:700;margin-bottom:10px;">La nostra missió</div>
+        <p style="font-size:.9rem;color:rgba(255,255,255,0.8);line-height:1.7;font-weight:400;">Protegir el pulmó verd de Barcelona detectant qualsevol risc d'incendi hores abans que es propagui. Els incendis forestals destrueixen milions d'hectàrees cada any — FireSense vol canviar això.</p>
+      </div>
+      <div>
+        <div style="width:48px;height:48px;background:rgba(74,222,128,0.15);border:1px solid rgba(74,222,128,0.3);border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:16px;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+        </div>
+        <div style="font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:.2em;color:#4ade80;text-transform:uppercase;font-weight:700;margin-bottom:10px;">La nostra tecnologia</div>
+        <p style="font-size:.9rem;color:rgba(255,255,255,0.8);line-height:1.7;font-weight:400;">Sensors RAK4631 LoRaWAN amb cobertura de 15km transmeten dades de temperatura i humitat del sòl cada hora al dashboard central, amb alertes en temps real i visualització NASA FIRMS.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="about-stats">
+    <div class="about-stat">
+      <span class="about-stat-val">AI<span>+</span></span>
+      <span class="about-stat-lab">Alertes</span>
+    </div>
+    <div class="about-stat">
+      <span class="about-stat-val">15<span>km</span></span>
+      <span class="about-stat-lab">Radi de cobertura</span>
+    </div>
+    <div class="about-stat">
+      <span class="about-stat-val">24<span>/7</span></span>
+      <span class="about-stat-lab">Monitorització contínua</span>
+    </div>
+    <div class="about-stat">
+      <span class="about-stat-val">868<span>MHz</span></span>
+      <span class="about-stat-lab">Banda EU LoRaWAN</span>
+    </div>
+  </div>
+
+
+</div>
+
+<div style="height:80px;background:#fff;"></div>
+<!-- DIVIDER → TECNOLOGIA -->
+<div class="sdivider">
+  <div class="sline"></div>
+  <a href="#tech">
+    <span>// Tecnologies</span>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0d5c2e" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+  </a>
+  <div class="sline rev"></div>
+</div>
+
+<!-- TECH -->
+<div id="tech" class="tech-bg" style="scroll-margin-top: 130px;">
+  <div class="tech-inner" style="position:relative;z-index:2;">
+    <h2 class="stitle" style="text-align:center;font-family:Times New Roman,serif;margin-bottom:64px;">Tecnologies</h2>
+    <div class="cards">
+      <div class="card">
+        <svg class="card-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="8" y="14" width="14" height="20" rx="2"/><rect x="26" y="14" width="14" height="20" rx="2"/><path d="M22 24h4M15 8v6M33 8v6M15 34v6M33 34v6"/></svg>
+        <h3>Nodes RAK4631</h3>
+        <p>Nordic nRF52840 + SX1262 LoRa. Sensors de temperatura, humitat i bateria. Activació OTAA amb AES-128.</p>
+      </div>
+      <div class="card">
+        <svg class="card-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="24" cy="24" r="8"/><path d="M24 4v8M24 36v8M4 24h8M36 24h8"/><path d="M10 10l5.6 5.6M32.4 32.4l5.6 5.6M10 38l5.6-5.6M32.4 15.6l5.6-5.6"/></svg>
+        <h3>Gateway RAK7289V2</h3>
+        <p>8 canals EU868. Backhaul 4G/Ethernet. Desplegat a la coberta de l'ITB amb visibilitat al Collserola.</p>
+      </div>
+      <div class="card">
+        <svg class="card-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="10" width="36" height="28" rx="3"/><path d="M14 20h20M14 26h12M14 32h16"/></svg>
+        <h3>ChirpStack v4</h3>
+        <p>Network Server LoRaWAN open-source. Gestió OTAA, decodificació de payloads i integració HTTP → Node-RED.</p>
+      </div>
+      <div class="card">
+        <svg class="card-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="24" r="5"/><circle cx="36" cy="12" r="5"/><circle cx="36" cy="36" r="5"/><path d="M17 24h8l7-10M17 25h8l7 9"/></svg>
+        <h3>Node-RED + InfluxDB v2</h3>
+        <p>Pipelines visuals de dades. Transformació, filtrat i emmagatzematge de sèries temporals amb Flux queries.</p>
+      </div>
+      <div class="card">
+        <svg class="card-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="28" width="8" height="14" rx="1"/><rect x="16" y="20" width="8" height="22" rx="1"/><rect x="28" y="12" width="8" height="30" rx="1"/><rect x="40" y="6" width="4" height="36" rx="1"/></svg>
+        <h3>Dashboard Leaflet/Cesium</h3>
+        <p>Mapa 2D/3D. NASA FIRMS, NDVI, EONET. Vent en viu, LOS, cobertura antena i gràfics Chart.js.</p>
+      </div>
+      <div class="card">
+        <svg class="card-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M24 6L6 18v24h36V18L24 6z"/><path d="M16 42V28h16v14"/><circle cx="24" cy="20" r="4"/></svg>
+        <h3>MeshCore</h3>
+        <p>Xarxa mesh complementària amb 2 gateways, 2 repetidors i 2 sensors per zones sense cobertura directa.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="height:80px;background:#fff;"></div>
+<!-- DIVIDER → NODES -->
+<div class="sdivider">
+  <div class="sline"></div>
+  <a href="#nodes">
+    <span>// Nodes</span>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0d5c2e" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+  </a>
+  <div class="sline rev"></div>
+</div>
+
+<!-- NODES -->
+<div id="nodes" class="nodes-dark"><video autoplay muted loop playsinline style="position:absolute;inset:0;width:100%;height:100%;min-height:100vh;object-fit:cover;z-index:0;opacity:0.75;filter:saturate(1.2) contrast(1.05) brightness(0.82);"><source src="nodes-bg.mp4" type="video/mp4"></video>
+  <div class="nodes-inner">
+    <span class="stag">// Infraestructura desplegada</span>
+    <h2 class="stitle" style="color:#fff;">Nodes <span style="color:#4ade80;">Actius</h2>
+    <div class="nodes-grid">
+      <div class="ncard"><div class="ndot"></div><span class="nid">GW-001</span><div class="nname">Gateway ITB</div><div class="ntech">RAK7289V2 · LoRaWAN</div></div>
+      <div class="ncard"><div class="ndot"></div><span class="nid">SN-001</span><div class="nname"><span style="font-variant-numeric:lining-nums;font-feature-settings:'lnum'">Node RN-01 ITB</span></div><div class="ntech">RAK4631 · EU868</div></div>
+      <div class="ncard"><div class="ndot"></div><span class="nid">SN-002</span><div class="nname"><span style="font-variant-numeric:lining-nums;font-feature-settings:'lnum'">Node RN-02 ITB</span></div><div class="ntech">RAK4631 · EU868</div></div>
+      <div class="ncard"><div class="ndot" style="background:#6b7280;box-shadow:0 0 8px #6b7280;"></div><span class="nid">MC-NET</span><div class="nname">Xarxa MeshCore</div><div class="ntech">2 GW · 2 REP · 2 SN</div></div>
+    </div>
+    <div class="nodes-cta">
+      <a href="index.html" class="nodes-btn">
+        Obrir Dashboard en Viu
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </a>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <img src="favicon.png" style="width:30px;height:30px;">
+  <div class="fmeta">Institut Tecnològic de Barcelona — ASIX2c<br>Projecte Espurna · Parc de Collserola · 2025-2026</div>
+</footer>
+
+</body>
+</html><script>
+const logo = document.querySelector('img[src="logo-itb.png"]');
+if(logo) {
+  window.addEventListener('scroll', () => {
+    const hero = document.querySelector('.hero');
+    const heroH = hero.offsetHeight;
+    const scroll = window.scrollY;
+    const opacity = Math.max(0, 0.9 - (scroll / heroH) * 2);
+    logo.style.opacity = opacity;
+  });
+}
+</script>
+<style>
+@media(max-width:768px){
+  .hero { padding: 72px 0 0 5%; height: 100svh; }
+  .hero-title { font-size: 2.2rem; }
+  .hero-sub { font-size: .85rem; }
+  .hero-btn { padding: 12px 24px; font-size: .82rem; }
+  #itb-logo { width: 80px !important; top: 80px !important; right: 12px !important; }
+  .about-hero-img { height: 100svh; background-attachment: scroll !important; }
+  .about-hero-caption { grid-template-columns: 1fr !important; gap: 20px; padding: 24px 5% 32px; }
+  .about-stats { grid-template-columns: repeat(2,1fr); }
+  .about-stat { padding: 20px; }
+  .about-stat-val { font-size: 1.8rem; }
+  .tech-bg { padding: 60px 5% 60px; background-attachment: scroll !important; }
+  .cards { grid-template-columns: 1fr !important; gap: 2px; }
+  .nodes-grid { grid-template-columns: 1fr 1fr !important; gap: 12px; }
+  .nodes-dark { min-height: auto !important; }
+  .nodes-inner { padding: 60px 0 !important; }
+  .nodes-btn { padding: 12px 24px; font-size: .82rem; }
+  nav { padding: 0 16px; }
+  .nav-links { display: none; }
+  .nav-cta { padding: 8px 14px; font-size: .78rem; }
+  .sdivider { padding: 14px 5%; }
+  footer { padding: 16px 5%; flex-direction: column; align-items: center; }
+  .fmeta { text-align: center; }
+}
+@media(max-width:480px){
+  .hero-title { font-size: 1.8rem; }
+  .about-stats { grid-template-columns: 1fr 1fr; }
+  .nodes-grid { grid-template-columns: 1fr !important; }
+  .cards { grid-template-columns: 1fr !important; }
+}
+</style>
+<style>
+@media(max-width:768px){
+  .about-hero-img > div:first-child { display: none; }
+}
+</style>
+<style>
+@media(max-width:768px){
+  .about-hero-img { height: auto !important; min-height: 100svh; }
+  .about-hero-caption { position: relative !important; padding: 24px 5% 32px !important; }
+}
+</style>
+<style>
+@media(max-width:768px){
+  .about-hero-img { min-height: auto !important; height: auto !important; }
+  .about-hero-img::after { background: linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(10,31,10,0.85) 50%, rgba(10,31,10,0.95) 100%) !important; }
+}
+</style>
+<style>
+@media(max-width:768px){
+  .about-hero-caption { padding-top: 48px !important; }
+}
+</style>
+<style>
+@media(max-width:768px){
+  .about-hero-img > div:first-child { 
+    display: block !important; 
+    padding: 20px 5% 0 !important;
+    position: relative !important;
+  }
+  .about-hero-img > div:first-child p {
+    font-size: 1.4rem !important;
+  }
+}
+</style>

@@ -31,3 +31,13 @@ Thumbs.db
 backups/*.db
 *.log
 temp/
+backend-server/grafana/data/grafana.db
+backend-server/mqtt/certs/
+backend-server/grafana/data/
+*.key
+*.key.bak
+backend-server/mqtt/certs/
+backend-server/grafana/data/
+*.key
+*.key.bak
+backend-server/mqtt/passwd*

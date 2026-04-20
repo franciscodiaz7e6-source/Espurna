@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="favicon.png?v=6">
+<title>Espvrna</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.115.0/Build/Cesium/Widgets/widgets.css"/>
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.115.0/Build/Cesium/Cesium.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet-velocity@2.1.0/dist/leaflet-velocity.min.css">
+<script src="https://unpkg.com/leaflet-velocity@2.1.0/dist/leaflet-velocity.min.js"></script>
+<script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet-image@0.4.0/leaflet-image.js"></script>
+</head>
+<body>
+<div class="hdr" style="position:relative;">
+  <img src="logo-itb.png" style="position:absolute;top:32px;right:32px;width:120px;filter:invert(1) sepia(1) saturate(5) hue-rotate(180deg) drop-shadow(0 0 5px rgba(0,229,255,0.5)) drop-shadow(0 0 12px rgba(0,229,255,0.25));opacity:0.9;"><div class="hdr-tag">Institut Tecnològic de Barcelona — Parc de Collserola</div>
+  <div class="hdr-title">Espvrna — Forest Fire Prevention</div>
+  <div class="hdr-sub">LoRaWAN EU868 · ChirpStack v4 · OTAA · AES-128 · Sensor Nodes</div>
+  <div class="hdr-line"></div>
+</div>
+<div class="status-bar">
+  <div style="display:flex;gap:16px;flex-wrap:wrap;">
+    
+    <div class="si"><div class="sdot dot-g"></div><span>ChirpStack: <span id="csStatus">CONNECTING...</span></span></div>
+    <div class="si"><div class="sdot dot-g" id="gwDot"></div><span>Gateway: <span id="gwStatusBar">CONNECTING...</span></span></div>
+    <div class="si"><div class="sdot dot-a" id="nodeDot"></div><span>Nodes: <span id="nodeStatus">en espera...</span></span></div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;">
+    <span id="liveClock" style="color:var(--cyan);letter-spacing:.08em;">—</span>
+    <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">→ LIGHT</button>
+  </div>
+</div>
+<div class="main">
+  <div class="map-card">
+    <div class="br"></div><div class="bl"></div>
+    <div class="edit-banner" id="editBanner"></div>
+    <div class="map-wrap" style="position:relative;">
+<!-- NODE DASHBOARD OVERLAY -->
+<div id="node-dashboard" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;z-index:998;background:linear-gradient(160deg,#050e1a 0%,#071525 40%,#060f1e 100%);overflow-y:auto;overflow-x:hidden;font-family:Share Tech Mono,monospace;padding:16px 16px 8px 16px;box-sizing:border-box;">
+<div style="max-width:100%;display:flex;flex-direction:column;height:100%;">
+  <!-- HEADER -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;border-bottom:1px solid rgba(0,229,255,.12);padding-bottom:12px;flex-wrap:wrap;gap:8px;">
+    <div>
+      <div style="font-size:9px;letter-spacing:.35em;color:rgba(0,229,255,.7);margin-bottom:3px;">ESPURNA IOT · NODE DASHBOARD</div>
+      <div style="font-size:17px;color:#00e5ff;letter-spacing:.1em;font-family:Rajdhani,sans-serif;font-weight:700;" id="db-node-title">RAK-NODO-01</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <button class="db-range-btn" data-r="24h" onclick="setDbRange('24h')" style="background:rgba(0,229,255,.15);border:1px solid rgba(0,229,255,.4);color:#00e5ff;padding:4px 9px;cursor:pointer;font-size:9px;letter-spacing:.1em;font-family:Share Tech Mono,monospace;transition:all .2s;">Últimes 24h</button>
+      <button class="db-range-btn" data-r="7d"  onclick="setDbRange('7d')"  style="background:transparent;border:1px solid rgba(0,229,255,.12);color:rgba(0,229,255,.4);padding:4px 9px;cursor:pointer;font-size:9px;letter-spacing:.1em;font-family:Share Tech Mono,monospace;transition:all .2s;">Últims 7 dies</button>
+      <button class="db-range-btn" data-r="30d" onclick="setDbRange('30d')" style="background:transparent;border:1px solid rgba(0,229,255,.12);color:rgba(0,229,255,.4);padding:4px 9px;cursor:pointer;font-size:9px;letter-spacing:.1em;font-family:Share Tech Mono,monospace;transition:all .2s;">Últims 30 dies</button>
+      <button class="db-range-btn" data-r="1y"  onclick="setDbRange('1y')"  style="background:transparent;border:1px solid rgba(0,229,255,.12);color:rgba(0,229,255,.4);padding:4px 9px;cursor:pointer;font-size:9px;letter-spacing:.1em;font-family:Share Tech Mono,monospace;transition:all .2s;">Últim any</button>
+      <div style="width:1px;height:14px;background:rgba(0,229,255,.15);margin:0 2px;"></div>
+      <input type="date" id="db-date-picker" onchange="setDbDate(this.value)" style="background:transparent;border:1px solid rgba(0,229,255,.12);color:rgba(0,229,255,.4);padding:4px 7px;font-size:9px;font-family:Share Tech Mono,monospace;cursor:pointer;outline:none;width:108px;letter-spacing:.05em;color-scheme:dark;" title="Dia exacte"/>
+      <div style="font-size:9px;color:rgba(0,229,255,.3);margin:0 4px;" id="db-last-update">—</div>
+      <button onclick="closeNodeDashboard()" style="background:rgba(255,50,50,.08);border:1px solid rgba(255,50,50,.25);color:#ff5555;width:26px;height:26px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;font-family:inherit;line-height:1;transition:all .2s;" onmouseover="this.style.background='rgba(255,50,50,.2)'" onmouseout="this.style.background='rgba(255,50,50,.08)'">&#x2715;</button>
+    </div>
+  </div>
+  <!-- STATS BAR -->
+  <div id="db-stats-bar" style="display:grid;grid-template-columns:repeat(4,1fr) auto;gap:8px;margin-bottom:8px;align-items:center;">
+    <div style="background:#061a2a;border:1px solid rgba(0,229,255,.15);padding:8px 12px;">
+      <div style="font-size:7px;letter-spacing:.2em;color:rgba(0,229,255,.5);margin-bottom:4px;">TEMP MIN/MAX/AVG</div>
+      <div style="font-size:11px;color:#00e5ff;letter-spacing:.05em;" id="db-stat-temp">— / — / —</div>
+    </div>
+    <div style="background:#061a2a;border:1px solid rgba(0,229,255,.15);padding:8px 12px;">
+      <div style="font-size:7px;letter-spacing:.2em;color:rgba(0,229,255,.5);margin-bottom:4px;">HUM AIRE MIN/MAX/AVG</div>
+      <div style="font-size:11px;color:#00ff88;letter-spacing:.05em;" id="db-stat-hum">— / — / —</div>
+    </div>
+    <div style="background:#061a2a;border:1px solid rgba(0,229,255,.15);padding:8px 12px;">
+      <div style="font-size:7px;letter-spacing:.2em;color:rgba(0,229,255,.5);margin-bottom:4px;">BATERIA MIN/MAX/AVG</div>
+      <div style="font-size:11px;color:#ffab40;letter-spacing:.05em;" id="db-stat-bat">— / — / —</div>
+    </div>
+    <div style="background:#061a2a;border:1px solid rgba(0,229,255,.15);padding:8px 12px;">
+      <div style="font-size:7px;letter-spacing:.2em;color:rgba(0,229,255,.5);margin-bottom:4px;">MOSTRES / ESTAT</div>
+      <div style="font-size:11px;color:#00e5ff;letter-spacing:.05em;" id="db-stat-count">—</div>
+    </div>
+    <button onclick="exportDashboardCSV()" style="background:rgba(0,229,255,.08);border:1px solid rgba(0,229,255,.25);color:#00e5ff;padding:8px 14px;cursor:pointer;font-size:9px;letter-spacing:.15em;font-family:Share Tech Mono,monospace;white-space:nowrap;height:100%;transition:all .2s;" onmouseover="this.style.background='rgba(0,229,255,.18)'" onmouseout="this.style.background='rgba(0,229,255,.08)'">↓ CSV</button>
+  </div>
+  <!-- CHARTS -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+    <div style="background:#061a2a;border:1px solid rgba(0,229,255,.2);padding:12px;">
+      <div id="db-title-temp" style="font-size:8px;letter-spacing:.2em;color:rgba(0,229,255,.75);margin-bottom:8px;">TEMPERATURA (°C)</div>
+      <div style="height:160px;"><canvas id="db-chart-temp"></canvas></div>
+    </div>
+    <div style="background:#061a2a;border:1px solid rgba(0,229,255,.2);padding:12px;">
+      <div id="db-title-hum" style="font-size:8px;letter-spacing:.2em;color:rgba(4,180,255,.75);margin-bottom:8px;">HUMITAT AIRE (%)</div>
+      <div style="height:160px;"><canvas id="db-chart-hum"></canvas></div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+    <div style="background:#061a2a;border:1px solid rgba(0,229,255,.2);padding:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div id="db-title-bat" style="font-size:8px;letter-spacing:.2em;color:rgba(0,255,136,.75);">BATERIA (%)</div><div id="db-bat-trend" style="font-size:9px;"></div></div>
+      <div style="height:160px;"><canvas id="db-chart-bat"></canvas></div>
+    </div>
+    <div style="background:#061a2a;border:1px solid rgba(0,229,255,.2);padding:12px;">
+      <div id="db-title-soil" style="font-size:8px;letter-spacing:.2em;color:rgba(212,133,74,.75);margin-bottom:8px;">HUMITAT SÒL (%)</div>
+      <div style="height:160px;"><canvas id="db-chart-soil"></canvas></div>
+    </div>
+  </div>
+  <!-- HISTORIAL -->
+  <div style="background:#061a2a;border:1px solid rgba(0,229,255,.2);padding:12px;flex:1;overflow-y:auto;min-height:0;">
+    <div style="font-size:8px;letter-spacing:.2em;color:rgba(0,229,255,.4);margin-bottom:8px;">HISTORIAL COMPLET</div>
+    <div id="db-hist-table"></div>
+  </div>
+</div>
+</div>
+<style>
+.db-kpi{background:#061a2a;border:1px solid rgba(0,229,255,.25);padding:12px;position:relative;overflow:hidden;}
+.db-kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#00e5ff,transparent);opacity:.5;}
+.db-kpi-lbl{font-size:8px;letter-spacing:.2em;color:rgba(0,229,255,.7);margin-bottom:5px;}
+.db-kpi-val{font-size:26px;color:#00e5ff;line-height:1;margin-bottom:2px;font-family:Rajdhani,sans-serif;font-weight:700;}
+.db-kpi-unit{font-size:9px;color:rgba(0,229,255,.6);}
+.db-hist-row{display:grid;grid-template-columns:60px 70px 65px 65px 145px;gap:8px;padding:5px 0;border-bottom:1px solid rgba(0,229,255,.05);font-size:10px;color:rgba(0,229,255,.65);}
+.db-hist-hdr{color:rgba(0,229,255,.65);font-size:8px;letter-spacing:.1em;border-bottom:1px solid rgba(0,229,255,.2) !important;}
+#db-date-picker::-webkit-calendar-picker-indicator{filter:invert(1) sepia(1) saturate(2) hue-rotate(160deg);opacity:.5;cursor:pointer;}
+#db-date-picker:hover{border-color:rgba(0,229,255,.35)!important;color:#00e5ff!important;}
+#node-dashboard canvas{display:block;width:100%!important;}
+</style>
+      <button id="hmenu-btn" onclick="toggleHMenu()"><svg id="hmenu-svg" width="18" height="20" viewBox="0 0 18 20" style="display:block"><line x1="0" y1="2" x2="18" y2="2" stroke="#00e5ff" stroke-width="2"/><line x1="0" y1="10" x2="18" y2="10" stroke="#00e5ff" stroke-width="2"/><line x1="0" y1="18" x2="18" y2="18" stroke="#00e5ff" stroke-width="2"/></svg></button>
+      <div id="hmenu-panel">
+        <div class="hm-title">◈ ESPURNA IOT</div>
+        <div id="hm-view-carto">
+          <button class="hm-btn" onclick="hmSetMap('sat')"><span>🛰</span><span>Satèl·lit</span></button>
+          <button class="hm-btn" id="hm-edit-carto" onclick="hmEdit()"><span id="hm-edit-icon-c">✎</span><span id="hm-edit-txt-c">Moure Nodes</span></button>
+          <button class="hm-btn" onclick="openCoordsPanel()"><span>🎯</span><span>Coordenades</span></button>
+        </div>
+        <div id="hm-view-sat" style="display:none">
+          <button class="hm-btn" onclick="hmSetMap('carto')"><span>🗺</span><span>Cartogràfic</span></button>
+          <button class="hm-btn" onclick="hmSetMap('3d')"><span>🏔</span><span>3D Fotorealista</span></button>
+          <button class="hm-btn" id="hm-edit-sat" onclick="hmEdit()"><span id="hm-edit-icon-s">✎</span><span id="hm-edit-txt-s">Moure Nodes</span></button>
+          <button class="hm-btn" onclick="openCoordsPanel()"><span>🎯</span><span>Coordenades</span></button>
+        </div>
+        <div id="hm-view-3d" style="display:none">
+          <button class="hm-btn" onclick="hmSetMap('carto')"><span>🗺</span><span>Cartogràfic</span></button>
+          <button class="hm-btn" onclick="hmSetMap('2d')"><span>↩</span><span>Tornar a 2D</span></button>
+
+        </div>
+      <div class="hm-div"></div>
+      <div class="hm-section">Eines</div>
+      <button class="hm-btn" id="hm-power-btn" onclick="togglePowerPanel()"><span>🌡</span><span>Meteorologia - NASA</span></button>
+      <button class="hm-btn" id="hm-firms-btn" onclick="toggleFirmsLayer()"><span>🔥</span><span>Punts de Calor - NASA</span></button>
+      <button class="hm-btn" id="hm-ndvi-btn" onclick="toggleNDVI()"><span>🌿</span><span>Vegetació - NASA</span></button>
+      <button class="hm-btn" id="hm-eonet-btn" onclick="toggleEonetPanel()"><span>🌍</span><span>Incendis - GENCAT</span></button>
+      <button class="hm-btn" id="hm-aemet-btn" onclick="toggleAemetPanel()"><span>⚡</span><span>Alertes - AEMET</span></button>
+      <button class="hm-btn" id="hm-aq-btn" onclick="toggleAQPanel()"><span>💨</span><span>Qualitat Aire - OpenAQ</span></button>
+      <button class="hm-btn" id="hm-wind-btn" onclick="toggleWindLayer()"><span>🌬</span><span>Vent en Viu</span></button>
+      <button class="hm-btn" id="hm-posar" onclick="hmPosar()"><span>📍</span><span>Posar Nodes</span></button>
+      <button class="hm-btn" id="hm-los" onclick="hmLOS()"><span>👁</span><span>Línia de Visió</span></button>
+      <button class="hm-btn" id="hm-cov" onclick="hmCOV()"><span>📡</span><span>Cobertura Antena</span></button>
+      </div>
+      <div id="los-hint" style="display:none;"></div>
+      <div id="burned-panel" style="display:none;position:absolute;bottom:12px;left:12px;z-index:1500;width:290px;max-height:45vh;background:rgba(2,8,14,.96);border:1px solid rgba(255,68,68,.35);border-radius:6px;overflow-y:auto;font-family:Share Tech Mono,monospace;box-shadow:0 0 30px rgba(255,50,0,.15);">
+  <div style="padding:12px 14px 8px;border-bottom:1px solid rgba(255,68,68,.2);display:flex;justify-content:space-between;align-items:center;">
+    <span style="color:#ff4444;font-size:11px;letter-spacing:.1em;">🔴 ZONES CREMADES - NASA MODIS</span>
+    <button onclick="closeBurnedPanel()" style="background:none;border:none;color:#ff4444;cursor:pointer;font-size:14px;">X</button>
+  </div>
+  <div id="burned-panel-body" style="padding:10px 14px;"></div>
+</div>
+<div id="ndvi-panel" style="display:none;position:absolute;bottom:12px;left:12px;z-index:1500;width:280px;max-height:45vh;background:rgba(2,8,14,.96);border:1px solid rgba(0,255,100,.35);border-radius:6px;overflow-y:auto;font-family:Share Tech Mono,monospace;box-shadow:0 0 30px rgba(0,255,100,.15);">
+  <div style="padding:12px 14px 8px;border-bottom:1px solid rgba(0,255,100,.2);display:flex;justify-content:space-between;align-items:center;">
+    <span style="color:#00ff64;font-size:11px;letter-spacing:.1em;">🌿 VEGETACIO - NASA MODIS NDVI</span>
+    <button onclick="closeNDVIPanel()" style="background:none;border:none;color:#00ff64;cursor:pointer;font-size:14px;">X</button>
+  </div>
+  <div id="ndvi-panel-body" style="padding:10px 14px;"></div>
+</div>
+<div id="aq-panel" style="display:none;position:absolute;bottom:12px;left:12px;z-index:1500;width:290px;max-height:45vh;background:rgba(2,8,14,.96);border:1px solid rgba(0,229,255,.35);border-radius:6px;overflow-y:auto;font-family:Share Tech Mono,monospace;box-shadow:0 0 30px rgba(0,180,255,.15);">
+  <div style="padding:12px 14px 8px;border-bottom:1px solid rgba(0,229,255,.2);display:flex;justify-content:space-between;align-items:center;">
+    <span style="color:#00e5ff;font-size:11px;letter-spacing:.1em;">💨 QUALITAT AIRE — OpenAQ</span>
+    <button onclick="closeAQPanel()" style="background:none;border:none;color:#00e5ff;cursor:pointer;font-size:14px;">✕</button>
+  </div>
+  <div id="aq-panel-body" style="padding:10px 14px;"></div>
+</div>
+<div id="aemet-panel" style="display:none;position:absolute;bottom:12px;left:12px;z-index:1500;width:290px;max-height:45vh;background:rgba(2,8,14,.96);border:1px solid rgba(255,200,0,.35);border-radius:6px;overflow-y:auto;font-family:Share Tech Mono,monospace;box-shadow:0 0 30px rgba(255,200,0,.1);">
+  <div style="padding:12px 14px 8px;border-bottom:1px solid rgba(255,200,0,.2);display:flex;justify-content:space-between;align-items:center;">
+    <span style="color:#ffc800;font-size:11px;letter-spacing:.1em;">⚡ PREDICCIO AEMET — CATALUNYA</span>
+    <button onclick="closeAemetPanel()" style="background:none;border:none;color:#ffc800;cursor:pointer;font-size:14px;">✕</button>
+  </div>
+  <div id="aemet-panel-body" style="padding:10px 14px;"></div>
+</div>
+<div id="power-panel" style="display:none;position:absolute;bottom:12px;left:12px;z-index:1500;width:300px;max-height:45vh;background:rgba(2,8,14,.96);border:1px solid rgba(0,229,255,.35);border-radius:6px;overflow-y:auto;font-family:Share Tech Mono,monospace;box-shadow:0 0 30px rgba(0,180,255,.15);">
+  <div style="padding:12px 14px 8px;border-bottom:1px solid rgba(0,229,255,.2);display:flex;justify-content:space-between;align-items:center;">
+    <span style="color:#00e5ff;font-size:11px;letter-spacing:.1em;">🌡 METEOROLOGIA — NASA POWER</span>
+    <button onclick="closePowerPanel()" style="background:none;border:none;color:#00e5ff;cursor:pointer;font-size:14px;">✕</button>
+  </div>
+  <div id="power-panel-body" style="padding:10px 14px;"></div>
+</div>
+<div id="eonet-panel" style="display:none;position:absolute;bottom:12px;left:12px;z-index:1500;width:300px;max-height:45vh;background:rgba(2,8,14,.96);border:1px solid rgba(255,68,68,.35);border-radius:6px;overflow-y:auto;font-family:Share Tech Mono,monospace;box-shadow:0 0 30px rgba(255,50,50,.15);">
+  <div style="padding:12px 14px 8px;border-bottom:1px solid rgba(255,68,68,.2);display:flex;justify-content:space-between;align-items:center;">
+    <span style="color:#ff4444;font-size:11px;letter-spacing:.1em;">🔥 INCENDIS FORESTALS — GENCAT</span>
+    <button onclick="closeEonetPanel()" style="background:none;border:none;color:#ff4444;cursor:pointer;font-size:14px;">✕</button>
+  </div>
+  <div id="eonet-panel-body" style="padding:10px 14px;"></div>
+</div>
+<div id="firms-panel" style="display:none;position:absolute;bottom:12px;left:12px;z-index:1500;width:280px;max-height:45vh;background:rgba(2,8,14,.96);border:1px solid rgba(255,152,0,.35);border-radius:6px;overflow-y:auto;font-family:Share Tech Mono,monospace;box-shadow:0 0 30px rgba(255,100,0,.15);">
+  <div style="padding:12px 14px 8px;border-bottom:1px solid rgba(255,152,0,.2);display:flex;justify-content:space-between;align-items:center;">
+    <span style="color:#ff9800;font-size:11px;letter-spacing:.1em;">🔥 PUNTS DE CALOR — NASA FIRMS</span>
+    <button onclick="closeFirmsPanel()" style="background:none;border:none;color:#ff9800;cursor:pointer;font-size:14px;">✕</button>
+  </div>
+  <div id="firms-panel-body" style="padding:10px 14px;"></div>
+</div>
+<div id="elev-panel" style="display:none">
+        <div id="elev-header">
+          <div id="elev-info">
+            <div id="elev-info-a"><span style="color:#5b9bd5 !important">Origen A:</span> <span id="elev-a-coords" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#5b9bd5 !important">Elev:</span> <span id="elev-a-val" style="color:#fff !important">—</span></div>
+            <div id="elev-info-b"><span style="color:#5b9bd5 !important">Destí B:</span> <span id="elev-b-coords" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#5b9bd5 !important">Elev:</span> <span id="elev-b-val" style="color:#fff !important">—</span></div>
+            <div id="elev-info-rf"><span style="color:#ff9800 !important">RF:</span> <span id="elev-rf-freq" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#ff9800 !important">Dist:</span> <span id="elev-rf-dist" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#ff9800 !important">FSPL:</span> <span id="elev-rf-fspl" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#ff9800 !important">Refrac:</span> <span id="elev-rf-refrac" style="color:#fff !important">0.25</span></div>
+          </div>
+          <div id="elev-actions">
+            <button class="elev-btn" onclick="elevSave()" title="Exportar PNG">📷</button>
+            <button class="elev-btn" id="elev-cfg-btn" onclick="elevConfig()" title="Configurar freqüència">⚙</button>
+            <button class="elev-btn" onclick="elevClose()" title="Tancar">✕</button>
+          </div>
+        </div>
+        <div id="elev-chart-wrap"><canvas id="elev-chart"></canvas></div>
+      </div>
+      <div id="pn-dots-wrap" style="display:none;position:absolute;top:10px;left:10px;z-index:2002;">
+        <button id="pn-dots-btn" onclick="event.stopPropagation();togglePNMenu()">⋮</button>
+        <div id="pn-dots-menu">
+          <button class="los-menu-item" onclick="event.stopPropagation();pnSetMode('gateway')"><span>📡</span><span>Posar Gateway</span></button>
+          <button class="los-menu-item" onclick="event.stopPropagation();pnSetMode('sensor')"><span><svg width="14" height="14" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg" width="14" height="14"><circle cx="250" cy="250" r="200" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="2"/><circle cx="250" cy="250" r="185" fill="#EE2C2C"/><g fill="white"><circle cx="250" cy="235" r="30"/><path d="M235 260 L265 260 L275 340 L225 340 Z"/><g fill="none" stroke="white" stroke-width="18" stroke-linecap="round"><path d="M210 195 A60 60 0 0 0 210 275"/><path d="M290 195 A60 60 0 0 1 290 275"/><path d="M185 170 A95 95 0 0 0 185 300"/><path d="M315 170 A95 95 0 0 1 315 300"/></g></g></svg></span><span>Posar Node Sensor</span></button>
+          <button class="los-menu-item" onclick="event.stopPropagation();pnSetMode('torre')"><span><svg width="14" height="12" viewBox="100 135 380 380" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="bgBlue3" cx="32%" cy="24%" r="78%"><stop offset="0%" stop-color="#57a8f3"/><stop offset="38%" stop-color="#2c87d8"/><stop offset="72%" stop-color="#0f6fbe"/><stop offset="100%" stop-color="#005ea8"/></radialGradient></defs><circle cx="290" cy="325" r="190" fill="#f4f4f4"/><circle cx="290" cy="325" r="183" fill="url(#bgBlue3)"/><g fill="#f4f4f4"><path d="M194 233 H230 V255 H248 V233 H281 V255 H299 V233 H332 V255 H350 V233 H386 V286 H194 Z"/><path d="M214 296 H366 V451 H327 V362 C327 327 253 327 253 362 V451 H214 V296 Z"/><rect x="206" y="392" width="18" height="59"/><rect x="356" y="392" width="18" height="59"/></g><path d="M271 451 V366 C271 334 309 334 309 366 V451 Z" fill="#0f6fbe"/></svg></span><span>Posar Torre</span></button>
+          <button class="los-menu-item" onclick="event.stopPropagation();pnMenuOpen=false;document.getElementById('pn-dots-menu').classList.remove('open');openCoordsPanel(true)"><span>🎯</span><span>Coordenades</span></button>
+          <button class="los-menu-item" onclick="event.stopPropagation();pnClearAll()"><span>🗑</span><span>Netejar tot</span></button>
+        </div>
+      </div>
+      <div id="los-dots-wrap" style="display:none;position:absolute;top:10px;left:10px;z-index:2002;">
+        <button id="los-dots-btn" onclick="event.stopPropagation();toggleLOSMenu()">⋮</button>
+        <div id="los-dots-menu">
+          <button class="los-menu-item" onclick="event.stopPropagation();losAddPoint()"><span>➕</span><span>Afegir punt</span></button>
+          <button class="los-menu-item" onclick="event.stopPropagation();losRemovePoint()"><span>➖</span><span>Eliminar últim punt</span></button>
+          <button class="los-menu-item" onclick="event.stopPropagation();hmClear()"><span>🗑</span><span>Netejar tot</span></button>
+        </div>
+      </div>
+      <div id="rf-dots-wrap" style="display:none;position:absolute;top:10px;left:10px;z-index:2002;">
+        <button id="rf-dots-btn" onclick="event.stopPropagation();toggleRFMenu()">⋮</button>
+        <div id="rf-dots-menu">
+          <button class="los-menu-item" onclick="event.stopPropagation();rfMenuOpen=false;document.getElementById('rf-dots-menu').classList.remove('open');rfOpenPanel()"><span>📡</span><span>Paràmetres RF</span></button>
+          <button class="los-menu-item" onclick="event.stopPropagation();exportMapPNG()"><span>📷</span><span>Exportar PNG</span></button>
+          <button class="los-menu-item" onclick="event.stopPropagation();rfClearCoverage()"><span>🗑</span><span>Netejar tot</span></button>
+        </div>
+      </div>
+      <div id="tool-info" style="display:none;position:absolute;bottom:40px;right:12px;z-index:2001;background:rgba(4,21,32,.95);border:1px solid rgba(0,229,255,.3);color:var(--txt2);font-family:var(--font-main);font-size:8.5px;letter-spacing:.06em;padding:10px 14px;max-width:220px;line-height:1.6;pointer-events:none;"></div>
+      <div id="map">
+        <div id="pn-modal" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:9999;background:rgba(0,0,0,.6);align-items:center;justify-content:center;" onclick="event.stopPropagation()">
+          <div style="background:rgba(2,8,14,.97);border:1px solid rgba(0,229,255,.4);border-radius:8px;padding:20px 24px;min-width:280px;font-family:Share Tech Mono,monospace;">
+            <div id="pn-modal-title" style="color:#00e5ff;font-size:11px;font-weight:bold;letter-spacing:.08em;margin-bottom:14px;">📍 NOM DEL NODE</div>
+            <div style="display:flex;gap:8px;margin-bottom:12px;">
+              <button id="pn-tech-lorawan" onclick="pnSelectTech('lorawan')" style="flex:1;padding:6px;background:rgba(0,229,255,.15);border:2px solid #00e5ff;color:#fff;font-family:Share Tech Mono,monospace;font-size:9px;border-radius:4px;cursor:pointer;">LoRaWAN</button>
+              <button id="pn-tech-meshcore" onclick="pnSelectTech('meshcore')" style="flex:1;padding:6px;background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.3);color:#fff;font-family:Share Tech Mono,monospace;font-size:9px;border-radius:4px;cursor:pointer;">MeshCore</button>
+            </div>
+            <input id="pn-modal-input" type="text" placeholder="Ex: Gateway ITB, Torre Valldaura..." style="width:100%;box-sizing:border-box;background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.3);border-radius:4px;color:#fff;font-family:Share Tech Mono,monospace;font-size:10px;padding:8px 10px;outline:none;margin-bottom:14px;">
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+              <button onclick="pnModalCancel()" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.6);font-family:Share Tech Mono,monospace;font-size:9px;padding:6px 14px;border-radius:4px;cursor:pointer;">Cancel·lar</button>
+              <button onclick="pnModalConfirm()" style="background:rgba(0,229,255,.15);border:1px solid rgba(0,229,255,.4);color:#00e5ff;font-family:Share Tech Mono,monospace;font-size:9px;padding:6px 14px;border-radius:4px;cursor:pointer;">Confirmar</button>
+            </div>
+          </div>
+        </div>
+        <div id="pn-panel" style="display:none;position:absolute;bottom:12px;left:12px;z-index:2001;background:rgba(2,8,14,.96);border:1px solid rgba(0,229,255,.3);border-radius:6px;width:260px;max-height:45vh;overflow-y:auto;font-family:Share Tech Mono,monospace;font-size:9px;color:rgba(0,229,255,.8);pointer-events:auto;" onclick="event.stopPropagation()">
+          <div style="padding:10px 14px 6px;border-bottom:1px solid rgba(0,229,255,.1);display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:10px;font-weight:bold;letter-spacing:.08em;">📍 NODES POSATS</span>
+            <button onclick="pnExportCSV()" style="background:rgba(0,229,255,.1);border:1px solid rgba(0,229,255,.3);color:#00e5ff;font-family:Share Tech Mono,monospace;font-size:8px;padding:2px 6px;border-radius:3px;cursor:pointer;">↓ CSV</button>
+          </div>
+          <div id="pn-panel-body" style="padding:8px 14px;"></div>
+        </div>
+      </div>
+      <!-- RF LLEGENDA -->
+      <div id="rf-legend" style="display:none;position:absolute;bottom:12px;left:12px;z-index:9999;background:rgba(2,8,14,.90);border:1px solid rgba(0,229,255,.22);padding:8px 12px;font-family:Share Tech Mono,monospace;font-size:9px;letter-spacing:.07em;flex-direction:column;gap:3px;backdrop-filter:blur(6px);border-radius:4px;">
+        <div style="color:rgba(0,229,255,.6);letter-spacing:.15em;margin-bottom:5px;font-size:8px;">COBERTURA RF</div>
+        <div style="display:flex;align-items:center;gap:7px;"><div style="width:12px;height:12px;border-radius:50%;background:rgba(30,220,60,.8);"></div><span style="color:rgba(255,255,255,.8);">Bona senyal &gt; -82 dBm</span></div>
+        <div style="display:flex;align-items:center;gap:7px;"><div style="width:12px;height:12px;border-radius:50%;background:rgba(140,220,30,.75);"></div><span style="color:rgba(255,255,255,.7);">Acceptable -82..-92 dBm</span></div>
+        <div style="display:flex;align-items:center;gap:7px;"><div style="width:12px;height:12px;border-radius:50%;background:rgba(230,180,20,.70);"></div><span style="color:rgba(255,255,255,.7);">Feble -92..-102 dBm</span></div>
+        <div style="display:flex;align-items:center;gap:7px;"><div style="width:12px;height:12px;border-radius:50%;background:rgba(230,100,20,.65);"></div><span style="color:rgba(255,255,255,.7);">Molt feble -102..-115 dBm</span></div>
+        <div style="display:flex;align-items:center;gap:7px;"><div style="width:12px;height:12px;border-radius:50%;background:rgba(200,40,40,.55);"></div><span style="color:rgba(255,255,255,.7);">Sin senyal -115..-137 dBm</span></div>
+      </div>
+      <div id="tool-info"      <div id="tool-info" style="display:none;position:absolute;bottom:40px;right:12px;z-index:2001;background:rgba(4,21,32,.95);border:1px solid rgba(0,229,255,.3);color:var(--txt2);font-family:var(--font-main);font-size:8.5px;letter-spacing:.06em;padding:10px 14px;max-width:220px;line-height:1.6;pointer-events:none;"></div>
+      <div id="map">
+      </div>
+      <!-- RF LLEGENDA -->
+      <div id="rf-legend" style="display:none;position:absolute;bottom:48px;left:12px;z-index:9999;background:rgba(2,8,14,.90);border:1px solid rgba(0,229,255,.22);padding:10px 14px;font-family:Share Tech Mono,monospace;font-size:9px;letter-spacing:.07em;flex-direction:column;gap:4px;backdrop-filter:blur(6px);border-radius:4px;min-width:180px;">
+        <div style="color:#00e5ff;letter-spacing:.15em;margin-bottom:6px;font-size:10px;border-bottom:1px solid rgba(0,229,255,.15);padding-bottom:5px;">📡 NODES RF</div>
+        <div id="rf-legend-nodes" style="display:flex;flex-direction:column;gap:4px;"></div>
+        <div style="margin-top:6px;border-top:1px solid rgba(0,229,255,.12);padding-top:6px;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+            <div style="width:50px;height:7px;background:linear-gradient(90deg,rgba(255,255,255,.15),rgba(255,255,255,.85));border-radius:2px;"></div>
+            <span style="color:rgba(0,229,255,.45);font-size:8px;">Feble → Forta</span>
+          </div>
+        </div>
+        <div style="margin-top:4px;">
+          <button onclick="rfClearCoverage()" style="width:100%;background:rgba(255,40,40,.10);border:1px solid rgba(255,80,80,.28);color:#ff5555;padding:4px 0;font-family:inherit;font-size:8px;letter-spacing:.1em;cursor:pointer;border-radius:2px;">NETEJAR TOT</button>
+        </div>
+      </div>
+      <div id="cesium-map" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;z-index:500;"></div>
+    </div>
+  </div>
+  <div class="right-panel">
+    <div class="card card-l-cyan">
+      <div class="card-title ct-c">◈ ChirpStack v4</div>
+      <div class="drow"><span>SERVIDOR</span><span class="dval">isard.nuvulet.itb.cat</span></div>
+      <div class="drow"><span>GATEWAY STATUS</span><span class="dval r" id="csGwSt">OFFLINE</span></div>
+      <div class="drow"><span>ACTIVACIÓ</span><span class="dval g">OTAA · JOINED</span></div>
+      <div class="drow"><span>NODES ONLINE</span><span class="dval" id="csNodes">—</span></div>
+      <div class="drow"><span>LAST JOIN</span><span class="dval" id="csJoin">—</span></div>
+    </div>
+    <div class="alert-box" id="alertBox">
+      <div class="alert-ttl">⚠ ALERTA RISC D'INCENDI</div>
+      <div class="alert-msg" id="alertMsg">—</div>
+    </div>
+    <div class="card card-l-green" id="liveCardBorder">
+      <div class="card-title ct-g" id="liveCardTitle"><div class="live-dot"></div>DADES EN VIU</div>
+      <div class="node-sel">
+        <button class="nbtn active" onclick="selNode(0)" id="nb0">RAK-01</button>
+        <button class="nbtn" onclick="selNode(1)" id="nb1">RAK-02</button>
+        <button class="nbtn" onclick="selNode(2)" id="nb2">RAK-03</button>
+        <button class="nbtn" onclick="selNode(3)" id="nb3">RAK-04</button>
+        <button class="nbtn" onclick="selNode(4)" id="nb4">RAK-05</button>
+      </div>
+      <div class="mbig">
+        <div class="mbig-lbl">Temperatura</div>
+        <div class="mbig-val vt" id="mainT">—</div>
+        <div class="mbig-unit">°C</div>
+      </div>
+      <div class="mrow">
+        <div class="mmini"><div class="mmini-lbl">Hum. Aire</div><div class="mmini-val vh" id="mainH">—</div><div class="mmini-unit">% RH</div></div>
+        <div class="mmini"><div class="mmini-lbl">Hum. Sòl</div><div class="mmini-val vs" id="mainS">—</div><div class="mmini-unit">% VWC</div></div>
+      </div>
+      <div class="drow" style="padding:4px 0;"><span>ESTAT</span><span class="dval" id="riskSt">—</span></div>
+      <div class="drow" style="padding:4px 0;"><span>UBICACIÓ</span><span class="dval" id="nodeCoords" style="font-size:8px;">—</span></div>
+      <div class="drow" style="padding:4px 0;"><span>ÚLTIMA DADA FA</span><span class="dval" id="lastSeen">—</span></div>
+      <div class="drow" style="padding:4px 0;"><span>FRAME COUNT</span><span class="dval" id="fCnt">—</span></div>
+      <div class="drow" style="padding:4px 0;"><span>BATERIA</span><span class="dval" id="batPct">—</span></div>
+      <div class="drow" style="padding:4px 0;"><span>PROPER ENVIAMENT</span><span class="dval" id="nextTx">—</span></div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:var(--cyan);font-size:11px;padding-left:0;display:flex;align-items:center;justify-content:space-between;"><div style="display:flex;flex-direction:column;line-height:1.3;"><span style="font-size:10px;letter-spacing:.15em;color:rgba(0,229,255,.4);">HISTORIAL &mdash;</span><span id="histLbl" style="font-size:12px;font-weight:700;">RAK-NODO-01</span></div><button onclick="openNodeDashboard()" title="Obrir dashboard" style="background:transparent;border:none;color:rgba(0,229,255,.55);width:28px;height:28px;cursor:pointer;background:transparent;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;width:28px;height:28px;transition:all .2s;" onmouseover="this.querySelector('svg').style.opacity='1'" onmouseout="this.querySelector('svg').style.opacity='0.55'"><svg width="18" height="12" viewBox="0 0 18 12" fill="none" xmlns="http://www.w3.org/2000/svg" style="opacity:.55;transition:opacity .2s;"><line x1="0" y1="6" x2="13" y2="6" stroke="#00e5ff" stroke-width="1.8"/><polyline points="8,1 14,6 8,11" fill="none" stroke="#00e5ff" stroke-width="1.8" stroke-linejoin="round"/></svg></button></div>
+      <div id="histList"><div class="hrow" style="font-style:italic;"><span>Carregant...</span></div></div>
+    </div>
+  </div>
+</div>
+<div class="coords-bar">
+  <span style="color:var(--cyan);letter-spacing:.12em;">NODES:</span>
+  <span id="coordsAll">—</span>
+  <span style="color:var(--txt3);">arrossega per reposicionar · zoom amb roda del ratolí</span>
+</div>
+<div class="sensor-section">
+  <div class="sec-hdr">
+    <h2>Telemetria en Viu</h2>
+    <span class="sec-sub">— EU868 / ACTUALITZACIÓ: 1h</span>
+    <div class="live-dot" style="margin-left:auto;"></div>
+  </div>
+  <div class="sgrid" id="sgrid"></div>
+</div>
+<div class="specs">
+  <div class="spec"><div class="spec-lbl">Freqüència</div><div class="spec-val">868 <span class="spec-unit">MHz</span></div></div>
+  <div class="spec"><div class="spec-lbl">Protocol</div><div class="spec-val" style="font-size:12px;">LoRaWAN</div></div>
+  <div class="spec"><div class="spec-lbl">Activació</div><div class="spec-val" style="font-size:12px;">OTAA</div></div>
+  <div class="spec"><div class="spec-lbl">Enviament</div><div class="spec-val" style="font-size:12px;">1h <span class="spec-unit">int</span></div></div>
+  <div class="spec"><div class="spec-lbl">Payload</div><div class="spec-val">7 <span class="spec-unit">bytes</span></div></div>
+</div>
+<div class="btm">
+  <span>Projecte Espurna · EspVRna · ITB ASIX2c 2025/2026</span>
+  <span id="apiSt" style="color:var(--txt3);">API: inicialitzant...</span>
+</div>
+<script src="js/config.js"></script>
+<script src="js/helpers.js"></script>
+<script src="js/canvas.js"></script>
+<script src="js/map.js"></script>
+<script src="js/data.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/theme.js"></script>
+<script src="js/poll.js"></script>
+<script src="js/app.js"></script>
+<!-- RF PANEL -->
+<div id="rf-panel" style="display:none;">
+  <button onclick="rfClosePanel()" style="position:absolute;top:8px;right:8px;background:rgba(255,50,50,.1);border:1px solid rgba(255,50,50,.3);color:#ff5555;width:24px;height:24px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;font-family:inherit;">✕</button>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:10px;color:rgba(0,229,255,.8);">
+    <label>Potència Tx (dBm)<br><input id="rf-txpower" type="number" value="27" style="width:100%;background:#000;border:1px solid rgba(0,229,255,.3);color:#00e5ff;padding:5px;font-family:inherit;margin-top:3px;"></label>
+    <label>Freqüència (MHz)<br><input id="rf-freq" type="number" value="868" style="width:100%;background:#000;border:1px solid rgba(0,229,255,.3);color:#00e5ff;padding:5px;font-family:inherit;margin-top:3px;"></label>
+    <label>Guany Tx (dBi)<br><input id="rf-txgain" type="number" value="3" step="0.5" style="width:100%;background:#000;border:1px solid rgba(0,229,255,.3);color:#00e5ff;padding:5px;font-family:inherit;margin-top:3px;"></label>
+    <label>Guany Rx (dBi)<br><input id="rf-rxgain" type="number" value="2" step="0.5" style="width:100%;background:#000;border:1px solid rgba(0,229,255,.3);color:#00e5ff;padding:5px;font-family:inherit;margin-top:3px;"></label>
+    <label>Alçada antena (m)<br><input id="rf-txh" type="number" value="10" style="width:100%;background:#000;border:1px solid rgba(0,229,255,.3);color:#00e5ff;padding:5px;font-family:inherit;margin-top:3px;"></label>
+    <label>Sensibilitat Rx (dBm)<br><input id="rf-sens" type="number" value="-137" style="width:100%;background:#000;border:1px solid rgba(0,229,255,.3);color:#00e5ff;padding:5px;font-family:inherit;margin-top:3px;"></label>
+    <label>Radi màxim (m)<br><input id="rf-radius" type="number" value="3000" step="500" style="width:100%;background:#000;border:1px solid rgba(0,229,255,.3);color:#00e5ff;padding:5px;font-family:inherit;margin-top:3px;"></label>
+    <label>Entorn<br><select id="rf-env" style="width:100%;background:#000;border:1px solid rgba(0,229,255,.3);color:#00e5ff;padding:5px;font-family:inherit;margin-top:3px;">
+      <option value="rural">Rural / Bosc</option>
+      <option value="suburban">Suburbà</option>
+      <option value="urban" selected>Urbà</option>
+    </select></label>
+  </div>
+  <div style="display:flex;gap:8px;margin-top:14px;">
+    <button onclick="rfLaunch()" style="flex:1;background:rgba(0,229,255,.12);border:1px solid rgba(0,229,255,.4);color:#00e5ff;padding:9px;font-family:inherit;font-size:10px;letter-spacing:.1em;cursor:pointer;">＋ AFEGIR NODE</button>
+  </div>
+  <div style="margin-top:14px;border-top:1px solid rgba(0,229,255,.15);padding-top:10px;">
+    <div style="font-size:9px;letter-spacing:.15em;color:rgba(0,229,255,.5);margin-bottom:6px;">NODES ACTIUS</div>
+    <div id="rf-node-list" style="font-size:11px;">
+      <div style="color:rgba(0,229,255,.3);font-size:9px;text-align:center;padding:8px;">Cap node calculat</div>
+    </div>
+  </div>
+  <div style="margin-top:10px;font-size:8px;color:rgba(0,229,255,.35);text-align:center;">Els enllaços entre nodes es calculen automàticament</div>
+</div>
+<script src="js/rf_buildings.js"></script>
+<script src="js/rf_multi.js"></script>
+<script src="js/rf_coverage.js"></script>
+</body>
+</html>

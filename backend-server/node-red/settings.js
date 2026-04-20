@@ -13,8 +13,8 @@ module.exports = {
     // NODE-RED SETTINGS
     uiPort: 1880,
     uiHost: "0.0.0.0",
-    httpAdminRoot: "/",
-    httpNodeRoot: "/api",
+    httpAdminRoot: "/nodered",
+    httpNodeRoot: "/nodered/api",
     
     logging: {
         console: {
@@ -36,6 +36,8 @@ module.exports = {
     },
 
     functionGlobalContext: {
+        axios: require("axios"),
+        require: require,
         influxdb_bucket: process.env.INFLUXDB_BUCKET || "sensor_data",
         influxdb_org: process.env.INFLUXDB_ORG || "PROJECTEESPVRNA"
     },

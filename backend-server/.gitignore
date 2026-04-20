@@ -1,6 +1,7 @@
 # Credenciales y secretos
 .env
 .env.local
+.env.staging
 *.key
 *.crt
 passwd

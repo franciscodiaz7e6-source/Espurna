@@ -1,0 +1,33 @@
+[logging]
+  level = "info"
+
+[postgresql]
+  dsn = "postgres://chirpstack:chirpstack_espurna@postgres/chirpstack?sslmode=disable"
+
+[redis]
+  servers = ["redis://redis/"]
+
+[network]
+  net_id = "000000"
+  enabled_regions = ["eu868"]
+
+[[regions]]
+  id = "eu868"
+  description = "EU868"
+  common_name = "EU868"
+
+  [regions.gateway]
+    [regions.gateway.backend]
+      enabled = "mqtt"
+      [regions.gateway.backend.mqtt]
+        server = "tcp://chirpstack-mqtt:1883"
+        topic_prefix = "eu868"
+
+[integration]
+  enabled = ["mqtt"]
+  [integration.mqtt]
+    server = "tcp://chirpstack-mqtt:1883"
+
+[api]
+  bind = "0.0.0.0:8080"
+  secret = "espurna_collserola_secret_2026"

@@ -1,0 +1,200 @@
+services:
+  # ============================================
+  # MQTT BROKER - TLS ACTIVADO
+  # ============================================
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22
+    container_name: mqtt-broker
+    restart: unless-stopped
+    hostname: mqtt-broker
+    ports:
+      - "8883"
+    volumes:
+      - ./mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mqtt/certs:/mosquitto/certs
+      - ./mqtt/passwd:/mosquitto/config/passwd
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-logs:/mosquitto/log
+    environment:
+      - TZ=Europe/Madrid
+    networks:
+      - iot-network
+    healthcheck:
+      test: ["CMD", "sh", "-c", "mosquitto_sub -h localhost -u monitor_user -P pirineus -t test -C 1 || exit 0"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    labels:
+      - "MQTT_Server_EspVRna"
+
+  # ============================================
+  # HOME ASSISTANT - MESHCORE GATEWAY (TCP/WiFi)
+  # ============================================
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    restart: unless-stopped
+    hostname: homeassistant
+    ports:
+      - "443:8123"
+    environment:
+      - TZ=Europe/Madrid
+    volumes:
+      - ha-config:/config
+      - /etc/localtime:/etc/localtime:ro
+      - /run/dbus:/run/dbus:ro
+      - ./mqtt/certs/ca.crt:/config/certs/mqtt-ca.crt:ro
+    networks:
+      - iot-network
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8123/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    labels:
+      - "HomeAssistant_MeshCore_EspVRna"
+
+  # ============================================
+  # INFLUXDB - TIME SERIES DATABASE
+  # ============================================
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: influxdb
+    restart: unless-stopped
+    hostname: influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_USER}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_PASSWORD}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_ADMIN_TOKEN}
+      - DOCKER_INFLUXDB_INIT_RETENTION=${INFLUXDB_RETENTION}
+      - TZ=Europe/Madrid
+      - INFLUXDB_HTTP_LOG_ENABLED=true
+      - INFLUXDB_REPORTING_DISABLED=false
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+      - ./influxdb/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+    networks:
+      - iot-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "InfluxDB_Server_EspVRna"
+
+  # ============================================
+  # NODE-RED - DATA PROCESSING & DASHBOARD
+  # ============================================
+  node-red:
+    build: ./node-red
+    container_name: node-red
+    restart: unless-stopped
+    hostname: node-red
+    ports:
+      - "1880:1880"
+    environment:
+      - NODE_RED_ENABLE_PROJECTS=true
+      - NODE_RED_ENABLE_SAFE_MODE=false
+      - TZ=Europe/Madrid
+      - NODE_OPTIONS=--max-old-space-size=256
+    volumes:
+      - node-red-data:/data
+      - ./node-red/settings.js:/data/settings.js
+      - ./node-red/ca.crt:/data/certs/ca.crt:ro
+    networks:
+      - iot-network
+    depends_on:
+      influxdb:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:1880/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ============================================
+  # GRAFANA - VISUALIZACIÓN DE DATOS
+  # ============================================
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: grafana
+    restart: unless-stopped
+    hostname: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - TZ=Europe/Madrid
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - INFLUXDB_ADMIN_TOKEN=${INFLUXDB_ADMIN_TOKEN}
+    volumes:
+      - ./grafana/data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - iot-network
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "Grafana_Dashboard_EspVRna"
+
+# ============================================
+# REDES
+# ============================================
+networks:
+  iot-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ============================================
+# VOLUMENES PERSISTENTES
+# ============================================
+volumes:
+  # MQTT
+  mosquitto-data:
+    driver: local
+  mosquitto-logs:
+    driver: local
+  
+  # InfluxDB
+  influxdb-data:
+    driver: local
+  influxdb-config:
+    driver: local
+  
+  # Node-RED
+  node-red-data:
+    driver: local
+  
+  # Grafana
+  grafana-data:
+    driver: local
+
+  # Home Assistant
+  ha-config:
+    driver: local
