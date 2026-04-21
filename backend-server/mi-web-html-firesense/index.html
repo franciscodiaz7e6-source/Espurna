@@ -22,10 +22,11 @@
 </head>
 <body>
 <div class="hdr" style="position:relative;">
-  <img src="logo-itb.png" style="position:absolute;top:32px;right:32px;width:120px;filter:invert(1) sepia(1) saturate(5) hue-rotate(180deg) drop-shadow(0 0 5px rgba(0,229,255,0.5)) drop-shadow(0 0 12px rgba(0,229,255,0.25));opacity:0.9;"><div class="hdr-tag">Institut Tecnològic de Barcelona — Parc de Collserola</div>
+  <div class="hdr-tag">Institut Tecnològic de Barcelona — Parc de Collserola</div>
   <div class="hdr-title">Firesense — Forest Fire Prevention</div>
   <div class="hdr-sub">LoRaWAN EU868 · ChirpStack v4 · OTAA · AES-128 · Sensor Nodes</div>
   <div class="hdr-line"></div>
+<img class="hdr-itb-desktop" src="logo-itb.png" style="display:none;position:absolute;top:32px;right:32px;width:120px;filter:invert(1) sepia(1) saturate(5) hue-rotate(180deg) drop-shadow(0 0 5px rgba(0,229,255,0.5)) drop-shadow(0 0 12px rgba(0,229,255,0.25));opacity:0.9;">
 </div>
 <div class="status-bar">
   <div style="display:flex;gap:16px;flex-wrap:wrap;">
@@ -36,7 +37,17 @@
   </div>
   <div style="display:flex;gap:10px;align-items:center;">
     <span id="liveClock" style="color:var(--cyan);letter-spacing:.08em;">—</span>
-    <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">→ LIGHT</button>
+    <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">→ LIGHT</button><img src="logo-itb.png" id="itb-neon" style="width:70px;filter:invert(1) sepia(1) saturate(5) hue-rotate(180deg) drop-shadow(0 0 5px rgba(0,229,255,0.5)) drop-shadow(0 0 12px rgba(0,229,255,0.25));opacity:0.9;">
+<style>
+@media(min-width:769px){
+  #itb-neon{display:none;}
+  .hdr-itb-desktop{display:block !important;}
+}
+@media(max-width:768px){
+  #itb-neon{display:inline-block;width:70px;}
+  .hdr-itb-desktop{display:none !important;}
+}
+</style>
   </div>
 </div>
 <div class="main">

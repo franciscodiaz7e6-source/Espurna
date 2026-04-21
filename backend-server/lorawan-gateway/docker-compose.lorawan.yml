@@ -9,7 +9,7 @@ services:
       - ./chirpstack-mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf
     networks:
       - lorawan-net
-      - shared-net
+      - backend-iot-network
 
   chirpstack:
     image: chirpstack/chirpstack:4
@@ -24,12 +24,12 @@ services:
       - TZ=Europe/Madrid
     networks:
       - lorawan-net
-      - shared-net
-      - backend-server_iot-network
+      - backend-iot-network
     depends_on:
       - postgres
       - redis
       - chirpstack-mqtt
+
   chirpstack-rest-api:
     image: chirpstack/chirpstack-rest-api:4
     container_name: chirpstack-rest-api
@@ -39,7 +39,7 @@ services:
     command: --server chirpstack:8080 --bind 0.0.0.0:8090 --insecure
     networks:
       - lorawan-net
-      - shared-net
+      - backend-iot-network
     depends_on:
       - chirpstack
 
@@ -68,10 +68,9 @@ services:
 networks:
   lorawan-net:
     driver: bridge
-  shared-net:          # ← añadir como externa
+  backend-iot-network:
     external: true
-  backend-server_iot-network:
-    external: true
+    name: backend-server_iot-network
 
 volumes:
   postgres-data:

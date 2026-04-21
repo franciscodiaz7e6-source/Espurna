@@ -1,0 +1,26 @@
+// ── CONFIG ─────────────────────────────────────────────────
+const INFLUX_URL = 'https://f5bd4ae6-64ea-466d-990b.372acb14d1b3.isard.nuvulet.itb.cat/influxdb';
+const INFLUX_ORG = 'ProjecteEspVRna';
+const INFLUX_TOKEN = '${INFLUX_TOKEN}';
+const INFLUX_BUCKET = 'sensor_data';
+const CS  = 'https://f5bd4ae6-64ea-466d-990b.372acb14d1b3.isard.nuvulet.itb.cat/chirpstack-api';
+const KEY = '${CHIRPSTACK_KEY}';
+const HDR = {'Authorization':'Bearer '+KEY,'Content-Type':'application/json'};
+const OFFLINE_MS    = 60 * 60 * 1000;
+const BURST_BEFORE_MS = 5 * 1000;
+const GW = {label:'GW-ITB',lat:41.45318,lng:2.18622};
+const NODES = [
+  {id:'RAK-NODO-01',devEUI:'ac1f09fffe245424',label:'RAK-01',lat:41.45352,lng:2.186453,deployed:true},
+  {id:'RAK-NODO-02',devEUI:'ac1f09fffe2454f7',label:'RAK-02',lat:41.45347,lng:2.186441,deployed:true},
+  {id:'RAK-NODO-03',devEUI:'ac1f09fffe245426',label:'RAK-03',lat:41.45342,lng:2.186429,deployed:true},
+  {id:'RAK-NODO-04',devEUI:'ac1f09fffe245427',label:'RAK-04',lat:41.45337,lng:2.186417,deployed:true},
+  {id:'RAK-NODO-05',devEUI:'ac1f09fffe245428',label:'RAK-05',lat:41.453111,lng:2.186475,deployed:true},
+];
+const nodeData=NODES.map(()=>({temp:null,hum:null,soil:null,fCnt:null,rssi:null,snr:null,bat_mv:null,bat_pct:null,time:null,rawTime:null,status:'waiting',history:[]}));
+let selIdx=0,editMode=false,map,gwMarker;
+const nodeMarkers=[],nodeCircles=[],nodeLines=[];
+const lastKnownRawTime=NODES.map(()=>null);
+const packetBurst=NODES.map(()=>0);
+const burstTriggered=NODES.map(()=>false);
+let canvas,ctx,packets=[],rafId=null,lastRaf=0,_cW=0,_cH=0;
+const NEON_COLORS=['#bf5fff','#e040fb','#ff2d9b','#7b2fff','#00cfff','#a259ff','#ff6ec7'];

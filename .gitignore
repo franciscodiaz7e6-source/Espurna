@@ -41,3 +41,25 @@ backend-server/grafana/data/
 *.key
 *.key.bak
 backend-server/mqtt/passwd*
+
+# Archivos generados por envsubst (contienen tokens reales)
+backend-server/mi-web-html-firesense/js/config.js
+backend-server/mi-web-html-firesense/js/map.js
+backend-server/mi-web-html-espurna/js/config.js
+backend-server/mi-web-html-espurna/js/map.js
+backend-server/mi-web-html-firesense/js/rf_coverage.js
+backend-server/mi-web-html-espurna/js/rf_coverage.js
+
+# Certificados
+backend-server/mqtt/certs/*.key
+backend-server/mqtt/certs/*.crt
+backend-server/mqtt/certs/*.csr
+backend-server/mqtt/certs/*.srl
+backend-server/nginx/certs/
+*.backup.*
+*.bak
+
+# htpasswd (contraseñas hasheadas, pero mejor fuera)
+backend-server/nginx/htpasswd
+backend-server/nginx/staging_htpasswd
+backend-server/mqtt/passwd

@@ -118,7 +118,7 @@ async function fetchGatewayStatus(){
     var gw=(j.result||[])[0];
     if(!gw||!gw.lastSeenAt)return false;
     var diff=Date.now()-new Date(gw.lastSeenAt).getTime();
-    var online=diff<10*60*1000;
+    var online=diff<60*60*1000;
     document.getElementById('csJoin').textContent=new Date(gw.lastSeenAt).toLocaleString('ca-ES');
     return online;
   }catch(e){return null;}

@@ -22,7 +22,18 @@
 </head>
 <body>
 <div class="hdr" style="position:relative;">
-  <img src="logo-itb.png" style="position:absolute;top:32px;right:32px;width:120px;filter:invert(1) sepia(1) saturate(5) hue-rotate(180deg) drop-shadow(0 0 5px rgba(0,229,255,0.5)) drop-shadow(0 0 12px rgba(0,229,255,0.25));opacity:0.9;"><div class="hdr-tag">Institut Tecnològic de Barcelona — Parc de Collserola</div>
+  <img src="logo-itb.png" id="itb-neon-esp" style="width:70px;filter:invert(1) sepia(1) saturate(5) hue-rotate(180deg) drop-shadow(0 0 5px rgba(0,229,255,0.5)) drop-shadow(0 0 12px rgba(0,229,255,0.25));opacity:0.9;">
+<style>
+@media(min-width:769px){
+  #itb-neon-esp{display:none;}
+  .hdr-itb-esp-desktop{display:block !important;}
+}
+@media(max-width:768px){
+  #itb-neon-esp{display:inline-block;width:70px;}
+  .hdr-itb-esp-desktop{display:none !important;}
+}
+</style>
+<img class="hdr-itb-esp-desktop" src="logo-itb.png" style="display:block;position:absolute;top:32px;right:32px;width:120px;filter:invert(1) sepia(1) saturate(5) hue-rotate(180deg) drop-shadow(0 0 5px rgba(0,229,255,0.5)) drop-shadow(0 0 12px rgba(0,229,255,0.25));opacity:0.9;"><div class="hdr-tag">Institut Tecnològic de Barcelona — Parc de Collserola</div>
   <div class="hdr-title">Espvrna — Forest Fire Prevention</div>
   <div class="hdr-sub">LoRaWAN EU868 · ChirpStack v4 · OTAA · AES-128 · Sensor Nodes</div>
   <div class="hdr-line"></div>
@@ -36,7 +47,7 @@
   </div>
   <div style="display:flex;gap:10px;align-items:center;">
     <span id="liveClock" style="color:var(--cyan);letter-spacing:.08em;">—</span>
-    <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">→ LIGHT</button>
+    <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">→ LIGHT</button><img id="itb-neon-esp-mobile" src="logo-itb.png" style="width:70px;filter:invert(1) sepia(1) saturate(5) hue-rotate(180deg) drop-shadow(0 0 5px rgba(0,229,255,0.5)) drop-shadow(0 0 12px rgba(0,229,255,0.25));opacity:0.9;display:none;"><style>@media(max-width:768px){#itb-neon-esp-mobile{display:inline-block !important;}#itb-neon-esp{display:none !important;}.hdr-itb-esp-desktop{display:none !important;}}</style>
   </div>
 </div>
 <div class="main">

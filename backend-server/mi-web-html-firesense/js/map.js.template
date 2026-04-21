@@ -1,0 +1,3565 @@
+// ── 3D TOGGLE ─────────────────────────────────────────────
+var mlMap=null;
+var cesiumViewer=null;
+var is3D=false;
+function getBuildingHeight(la,ln){
+  var key=la.toFixed(4)+","+ln.toFixed(4);
+  if(_bldCache[key]!==undefined) return Promise.resolve(_bldCache[key]);
+  var q="[out:json][timeout:25];way(around:200,"+la+","+ln+")[\"height\"];out tags;";
+  var ctrl=new AbortController();
+  var tid=setTimeout(function(){ctrl.abort();},25000);
+  return fetch("https://overpass.kumi.systems/api/interpreter?data="+encodeURIComponent(q),{signal:ctrl.signal})
+    .then(function(r){clearTimeout(tid);return r.json();})
+    .then(function(d){
+      for(var i=0;i<d.elements.length;i++){
+        var h=parseFloat(d.elements[i].tags&&d.elements[i].tags.height);
+        if(h>0){_bldCache[key]=h;return h;}
+      }
+      _bldCache[key]=2;return 2;
+    }).catch(function(){_bldCache[key]=2;return 2;});
+}
+function hideLeafletZoom(){
+  var z=document.querySelector('.leaflet-control-zoom');
+  if(z)z.style.display='none';
+}
+function showLeafletZoom(){
+  var z=document.querySelector('.leaflet-control-zoom');
+  if(z)z.style.display='';
+}
+
+window.runElevationProfile2D=function(latA,lngA,eA,latB,lngB,eB,dist,elevs,bldHeights){
+  console.log('[2D Profile] called, elevs:',elevs.length,'dist:',dist,'eA:',eA,'eB:',eB,'heights:',elevs);
+  var n=elevs.length;
+  var distances=elevs.map(function(_,i){return dist*i/(n-1);});
+  var heights=elevs.map(function(e){return e||0;});
+
+  var bh=bldHeights||[2,2];
+  // Collserola tower override
+  var _cLat=41.41702,_cLng=2.11436;
+  if(Math.sqrt(Math.pow(latA-_cLat,2)+Math.pow(lngA-_cLng,2))<0.0001) bh[0]=288;
+  if(Math.sqrt(Math.pow(latB-_cLat,2)+Math.pow(lngB-_cLng,2))<0.0001) bh[1]=288;
+  // Limitar altura estructura a 50m maxim (evita valors incorrectes OSM), excepte torre
+  bh=[bh[0]===288?288:Math.min(bh[0]||2,50),bh[1]===288?288:Math.min(bh[1]||2,50)];
+  var eAreal=eA+bh[0], eBreal=eB+bh[1];
+  var R_eff=8500000;
+  var losHeights=distances.map(function(d){
+    var lineal=eAreal+(eBreal-eAreal)*(d/dist);
+    var d1=d,d2=dist-d;
+    var curv=(d1*d2)/(2*R_eff);
+    return lineal-curv;
+  });
+  var _frMid=fresnelR(dist/2,dist/2,elevFreq);
+  var fresnelTop=distances.map(function(d,i){
+    // Usar el segon i penultim punt com a primer/ultim per evitar aplanament
+    var dEff = dist/(distances.length-1);
+    var d1 = Math.max(d, dEff);
+    var d2 = Math.max(dist-d, dEff);
+    return losHeights[i]+_frMid*Math.sin(Math.PI*d1/(d1+d2));
+  });
+  var fresnelBot=distances.map(function(d,i){
+    var dEff = dist/(distances.length-1);
+    var d1 = Math.max(d, dEff);
+    var d2 = Math.max(dist-d, dEff);
+    return losHeights[i]-_frMid*Math.sin(Math.PI*d1/(d1+d2));
+  });
+
+  // Fresnel zona 2 (r*sqrt(2)) i zona 3 (r*sqrt(3))
+  var _frMid2=_frMid*Math.sqrt(2);
+  var _frMid3=_frMid*Math.sqrt(3);
+  var fresnelTop2=distances.map(function(d,i){
+    var dEff=dist/(distances.length-1);
+    var d1=Math.max(d,dEff),d2=Math.max(dist-d,dEff);
+    return losHeights[i]+_frMid2*Math.sin(Math.PI*d1/(d1+d2));
+  });
+  var fresnelBot2=distances.map(function(d,i){
+    var dEff=dist/(distances.length-1);
+    var d1=Math.max(d,dEff),d2=Math.max(dist-d,dEff);
+    return losHeights[i]-_frMid2*Math.sin(Math.PI*d1/(d1+d2));
+  });
+  var fresnelTop3=distances.map(function(d,i){
+    var dEff=dist/(distances.length-1);
+    var d1=Math.max(d,dEff),d2=Math.max(dist-d,dEff);
+    return losHeights[i]+_frMid3*Math.sin(Math.PI*d1/(d1+d2));
+  });
+  var fresnelBot3=distances.map(function(d,i){
+    var dEff=dist/(distances.length-1);
+    var d1=Math.max(d,dEff),d2=Math.max(dist-d,dEff);
+    return losHeights[i]-_frMid3*Math.sin(Math.PI*d1/(d1+d2));
+  });
+  // Marge adaptatiu: SRTM 90m te error +-10m en distancies curtes
+  var srtmMargin=dist<500?1:dist<1000?1:1;
+  var firstObstruction=-1;
+  for(var i=0;i<heights.length;i++){
+    if(heights[i]>losHeights[i]+srtmMargin){firstObstruction=i;break;}
+  }
+  document.getElementById('elev-panel').style.display='block';
+  if(typeof closeAllNasaPanels==='function') closeAllNasaPanels();
+  var _rfl=document.getElementById('rf-legend');if(_rfl)_rfl.style.visibility='hidden';
+  // Restaura spans originals (poden haver estat sobreescrits pel 3D)
+  var _ia=document.getElementById('elev-info-a');
+  var _ib=document.getElementById('elev-info-b');
+  if(_ia)_ia.innerHTML='<span style="color:#5b9bd5 !important">Origen A:</span> <span id="elev-a-coords" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#5b9bd5 !important">Elev:</span> <span id="elev-a-val" style="color:#fff !important">—</span>';
+  if(_ib)_ib.innerHTML='<span style="color:#5b9bd5 !important">Destí B:</span> <span id="elev-b-coords" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#5b9bd5 !important">Elev:</span> <span id="elev-b-val" style="color:#fff !important">—</span>';
+  var _irf=document.getElementById('elev-info-rf');
+  if(_irf)_irf.innerHTML='<span style="color:#ff9800 !important">RF:</span> <span id="elev-rf-freq" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#ff9800 !important">Dist:</span> <span id="elev-rf-dist" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#ff9800 !important">FSPL:</span> <span id="elev-rf-fspl" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#ff9800 !important">Refrac:</span> <span id="elev-rf-refrac" style="color:#fff !important">0.25</span>';
+  var fspl=calcFSPL(dist,elevFreq);
+  function setSpan(id,val){var el=document.getElementById(id);if(el)el.textContent=val;}
+  setSpan('elev-a-coords',latA.toFixed(5)+', '+lngA.toFixed(5));
+  setSpan('elev-a-val',bh[0]>2?eAreal.toFixed(1)+'m ('+eA.toFixed(0)+'m sol + '+bh[0].toFixed(0)+'m estructura)':eAreal.toFixed(1)+'m');
+  setSpan('elev-b-coords',latB.toFixed(5)+', '+lngB.toFixed(5));
+  setSpan('elev-b-val',bh[1]>2?eBreal.toFixed(1)+'m ('+eB.toFixed(0)+'m sol + '+bh[1].toFixed(0)+'m estructura)':eBreal.toFixed(1)+'m');
+  setSpan('elev-rf-freq',elevFreq+'MHz');
+  setSpan('elev-rf-dist',(dist/1000).toFixed(2)+'km');
+  setSpan('elev-rf-fspl',fspl.toFixed(1)+'dB');
+  document.getElementById('los-hint').textContent=firstObstruction>=0?'🔴 OBSTRUÏDA — Obstrucció a '+(distances[firstObstruction]/1000).toFixed(2)+'km':'🟢 LLIURE — Visió directa OK';
+  if(window.elevChart2D){window.elevChart2D.destroy();window.elevChart2D=null;}
+  // Ajustar escala Y per mostrar el terreny correctament
+  var minH=Math.min.apply(null,heights.concat([eAreal,eBreal]).concat(fresnelBot3));
+  var maxH=Math.max.apply(null,heights.concat([eAreal,eBreal]).concat(fresnelTop3));
+  var pad=(maxH-minH)*0.15||10;
+  window._elevYMin=Math.max(0,minH-pad);
+  window._elevYMax=maxH+pad;
+  renderElevPanel({
+    distances:distances,heights:heights,
+    losHeights:losHeights,firstObstruction:firstObstruction,
+    fresnelTop:fresnelTop,fresnelBot:fresnelBot,
+    fresnelTop2:fresnelTop2,fresnelBot2:fresnelBot2,
+    fresnelTop3:fresnelTop3,fresnelBot3:fresnelBot3,
+    bldH:bh,eAreal:eAreal,eBreal:eBreal
+  });
+  window.elevChart2D=elevChart;
+}
+
+var KEY_MT       = '${MAPTILER_KEY}';
+var CESIUM_TOKEN = '${CESIUM_TOKEN}';
+
+// ── MAP (Leaflet) ────────────────────────────────────────────
+var currentMap='carto';
+var cartoLayer,satelliteLayer;
+var btn3d={textContent:''};
+var NODES_ORIG=[];
+
+
+// Plugin global Chart.js per labels A/B al LOS
+Chart.register({
+  id:'losLabels',
+  afterDraw:function(chart){
+    if(!chart.canvas.id||chart.canvas.id!=='elev-chart') return;
+    var ctx=chart.ctx;
+    // Buscar el dataset LOS (l'ultim amb dades de losHeights)
+    var meta=null;for(var _mi=chart.data.datasets.length-1;_mi>=0;_mi--){var _m=chart.getDatasetMeta(_mi);if(_m&&_m.data&&_m.data.length>1){meta=_m;break;}}
+    if(!meta||!meta.data||!meta.data.length) return;
+    [0,meta.data.length-1].forEach(function(idx,li){
+      var pt=meta.data[idx];if(!pt)return;
+      var lbl=li===0?'A':'B';
+      var col=li===0?'#ffff00':'#00e5ff';
+      var y=Math.max(pt.y-14,14);
+      ctx.save();
+      ctx.font='bold 12px monospace';
+      ctx.textAlign='center';
+      ctx.fillStyle=col;
+      ctx.fillText(lbl,pt.x,y);
+      ctx.restore();
+    });
+  }
+});
+// Plugin global Fresnel el·liptic
+window._fresnelEllipsePlugin = {
+  id: 'fresnelEllipse',
+  afterDatasetsDraw: function(chart) {
+    var fd = window._fresnelDrawData;
+    if(!fd||!fd.top||!fd.top.length) return;
+    var ctx2=chart.ctx, xAxis=chart.scales.x, yAxis=chart.scales.y, n=fd.top.length;
+    ctx2.save();
+    ctx2.beginPath();
+    ctx2.rect(chart.chartArea.left, chart.chartArea.top, chart.chartArea.right-chart.chartArea.left, chart.chartArea.bottom-chart.chartArea.top);
+    ctx2.clip();
+
+    function xpx(i){ return xAxis.getPixelForValue(i); }
+    function ypx(v){ return yAxis.getPixelForValue(v); }
+
+    // Area zona 1
+    ctx2.beginPath(); ctx2.setLineDash([]); ctx2.fillStyle='rgba(144,238,144,0.08)';
+    for(var i=0;i<n;i++) ctx2.lineTo(xpx(i), ypx(fd.top[i]));
+    for(var i=n-1;i>=0;i--) ctx2.lineTo(xpx(i), ypx(fd.bot[i]));
+    ctx2.closePath(); ctx2.fill();
+
+    // Zona 1 (verd)
+    ctx2.setLineDash([4,3]); ctx2.strokeStyle='rgba(144,238,144,0.9)'; ctx2.lineWidth=1.5;
+    ctx2.beginPath();
+    for(var i=0;i<n;i++){if(i===0)ctx2.moveTo(xpx(i),ypx(fd.top[i]));else ctx2.lineTo(xpx(i),ypx(fd.top[i]));}
+    ctx2.stroke();
+    ctx2.beginPath();
+    for(var i=0;i<n;i++){if(i===0)ctx2.moveTo(xpx(i),ypx(fd.bot[i]));else ctx2.lineTo(xpx(i),ypx(fd.bot[i]));}
+    ctx2.stroke();
+
+    // Zona 2 (taronja)
+    ctx2.setLineDash([3,5]); ctx2.strokeStyle='rgba(255,165,0,0.65)'; ctx2.lineWidth=1.3;
+    ctx2.beginPath();
+    for(var i=0;i<n;i++){if(i===0)ctx2.moveTo(xpx(i),ypx(fd.top2[i]));else ctx2.lineTo(xpx(i),ypx(fd.top2[i]));}
+    ctx2.stroke();
+    ctx2.beginPath();
+    for(var i=0;i<n;i++){if(i===0)ctx2.moveTo(xpx(i),ypx(fd.bot2[i]));else ctx2.lineTo(xpx(i),ypx(fd.bot2[i]));}
+    ctx2.stroke();
+
+    // Zona 3 (blau)
+    ctx2.setLineDash([2,6]); ctx2.strokeStyle='rgba(100,180,255,0.45)'; ctx2.lineWidth=1.1;
+    ctx2.beginPath();
+    for(var i=0;i<n;i++){if(i===0)ctx2.moveTo(xpx(i),ypx(fd.top3[i]));else ctx2.lineTo(xpx(i),ypx(fd.top3[i]));}
+    ctx2.stroke();
+    ctx2.beginPath();
+    for(var i=0;i<n;i++){if(i===0)ctx2.moveTo(xpx(i),ypx(fd.bot3[i]));else ctx2.lineTo(xpx(i),ypx(fd.bot3[i]));}
+    ctx2.stroke();
+
+    ctx2.restore();
+  }
+};
+// Plugin global fons chart - estil MeshCore
+Chart.register({
+  id:'chartBg',
+  beforeDraw:function(chart){
+    var ctx=chart.ctx;
+    ctx.save();
+    ctx.fillStyle='#1a2635';
+    ctx.fillRect(0,0,chart.width,chart.height);
+    ctx.restore();
+  }
+});
+// Plugin global per línies discontínues (Fresnel)
+Chart.register({
+  id:'dashedLines',
+  beforeDatasetDraw:function(chart,args){
+    var ds=chart.data.datasets[args.index];
+    if(ds && ds.borderDash){
+      chart.ctx.save();
+      chart.ctx.setLineDash(ds.borderDash);
+    }
+    return true;
+  },
+  afterDatasetDraw:function(chart,args){
+    var ds=chart.data.datasets[args.index];
+    if(ds && ds.borderDash){
+      chart.ctx.setLineDash([]);
+      chart.ctx.restore();
+    }
+  }
+});
+
+function initMap(){
+  map=L.map('map',{center:[GW.lat,GW.lng],zoom:18,zoomControl:true,renderer:L.canvas({useCORS:true})});
+
+  cartoLayer=L.tileLayer('https://api.maptiler.com/maps/outdoor-v2/{z}/{x}/{y}.png?key='+KEY_MT,{
+    attribution:'© <a href="https://www.maptiler.com/">MapTiler</a> © <a href="https://www.openstreetmap.org/">OSM</a>',
+    crossOrigin: true,maxZoom:20,tileSize:512,zoomOffset:-1
+  });
+  satelliteLayer=L.tileLayer('https://api.maptiler.com/maps/satellite/{z}/{x}/{y}.jpg?key='+KEY_MT,{
+    attribution:'© <a href="https://www.maptiler.com/">MapTiler</a>',
+    crossOrigin: true,maxZoom:20,tileSize:512,zoomOffset:-1
+  });
+  cartoLayer.addTo(map);
+
+  // Botons gestionats pel menu hamburguesa (btn3d es global)
+
+  // Gateway marker
+  gwMarker=L.marker([GW.lat,GW.lng],{
+    icon:L.divIcon({className:'',html:'<div class="gw-icon-wrap"><div class="gw-hex-icon"><div class="gw-dot"></div></div></div>',iconSize:[30,30],iconAnchor:[15,15],popupAnchor:[0,-20]}),
+    draggable:false,zIndexOffset:1000
+  }).addTo(map);
+  gwMarker.bindPopup(
+    '<div class="popup-title">◈ '+GW.label+' — RAK7289V2</div>'+
+    '<div class="popup-row"><span>ID</span><span class="popup-val">ac1f09fffe1c63e1</span></div>'+
+    '<div class="popup-row"><span>Estat</span><span class="popup-val" id="gwPopupSt" style="color:#555">○ OFFLINE</span></div>'+
+    '<div class="popup-row"><span>Freq.</span><span class="popup-val">868 MHz EU868</span></div>'+
+    '<div class="popup-row"><span>Ubicació</span><span class="popup-val">Aula 301 — ITB</span></div>'+
+    '<div class="popup-coords">Lat: '+GW.lat.toFixed(6)+' · Lng: '+GW.lng.toFixed(6)+'</div>'
+  );
+  gwMarker.on('popupopen',function(){
+    var el=document.getElementById('gwPopupSt');if(!el)return;
+    var on=document.getElementById('csGwSt').textContent.includes('ONLINE');
+    el.textContent=on?'● ONLINE':'○ OFFLINE';
+    el.style.color=on?'var(--green)':'#555';
+  });
+
+
+
+
+
+  // Guardar posicions originals
+  if(NODES_ORIG.length===0) NODES.forEach(function(n){ NODES_ORIG.push({lat:n.lat,lng:n.lng}); });
+  NODES.forEach(function(_,i){if(NODES[i].deployed)createNodeMarker(i);});
+  updateCoordsBar();
+  map.whenReady(function(){initCanvas();spawnPackets();startRaf();hmEnable3DTools(true);});
+  setTimeout(function(){hmEnable3DTools(true);},500);
+  map.on('move zoom moveend zoomend',syncCanvas);
+  // Click handler 2D
+  var stopEls=['los-dots-wrap','rf-dots-wrap','pn-dots-wrap','pn-panel','hmenu-panel','rf-panel'];
+  stopEls.forEach(function(id){
+    var el=document.getElementById(id);
+    if(el)L.DomEvent.disableClickPropagation(el);
+  });
+  window.losPoints2D=window.losPoints2D||[];
+  map.on('click',function(e){
+    console.log('[2D Click] waitingForClick='+waitingForClick+' losMode='+losMode+' covMode='+covMode+' is3D='+is3D);
+    if(is3D) return;
+    if(pnMode&&pnCurrentType){var _ll=e.latlng;pnShowModal(_ll.lat,_ll.lng,pnCurrentType);return;}
+    if(pnMode&&pnCurrentType){var _ll=e.latlng;pnShowModal(_ll.lat,_ll.lng,pnCurrentType);return;}
+    if(!waitingForClick) return;
+    var lat=e.latlng.lat, lng=e.latlng.lng;
+    if(losMode){
+      if(window.losPoints2D.length>=2){
+        window.lastLosPoints2D=window.losPoints2D.slice();
+        window.losPoints2D=[];
+        if(window.losMarker2DA){try{map.removeLayer(window.losMarker2DA);}catch(e){}window.losMarker2DA=null;}
+        if(window.losMarker2DB){try{map.removeLayer(window.losMarker2DB);}catch(e){}window.losMarker2DB=null;}
+        if(window.losLine2D){try{map.removeLayer(window.losLine2D);}catch(e){}window.losLine2D=null;}
+        // Netejar Fresnel 3D (losPrimitives) quan es reinicia amb nou punt
+        losPrimitives.forEach(function(p){try{cesiumViewer.entities.remove(p);}catch(e){try{cesiumViewer.scene.primitives.remove(p);}catch(e2){}}});
+        losPrimitives=[];
+        if(losEntityA){try{cesiumViewer.entities.remove(losEntityA);}catch(e){}losEntityA=null;}
+        if(losEntityB){try{cesiumViewer.entities.remove(losEntityB);}catch(e){}losEntityB=null;}
+        if(losEntityLine){try{cesiumViewer.entities.remove(losEntityLine);}catch(e){}losEntityLine=null;}
+        losPoints=[];
+        document.getElementById('elev-panel').style.display='none';
+      }
+      if(window.losPoints2D.length===0){
+        window.losPoints2D.push({lat:lat,lng:lng});
+        if(window.losMarker2DA) map.removeLayer(window.losMarker2DA);
+        window.losMarker2DA=L.circleMarker([lat,lng],{radius:9,color:'white',weight:2,fillColor:'#ffff00',fillOpacity:1,interactive:false}).addTo(map);
+        window.losMarker2DA.bindTooltip('A',{permanent:true,direction:'top',offset:[0,-8],className:'los-label-2d los-label-a'}).openTooltip();
+        waitingForClick=false;
+        map.getContainer().style.cursor='';
+        map.getContainer().classList.remove('waiting-click');
+        document.body.classList.remove('waiting-click');document.documentElement.style.cursor='';
+        document.getElementById('los-hint').textContent='Punt A posat. Obre menu per afegir punt B';
+      } else if(window.losPoints2D.length===1){
+        window.losPoints2D.push({lat:lat,lng:lng});
+        if(window.losMarker2DB) map.removeLayer(window.losMarker2DB);
+        window.losMarker2DB=L.circleMarker([lat,lng],{radius:9,color:'white',weight:2,fillColor:'#00e5ff',fillOpacity:1,interactive:false}).addTo(map);
+        window.losMarker2DB.bindTooltip('B',{permanent:true,direction:'top',offset:[0,-8],className:'los-label-2d los-label-b'}).openTooltip();
+        if(window.losLine2D) map.removeLayer(window.losLine2D);
+        var ptA=window.losPoints2D[0];
+        window.losLine2D=L.polyline([[ptA.lat,ptA.lng],[lat,lng]],{color:'#00ff88',weight:2.5,opacity:0.85,interactive:false}).addTo(map);
+        waitingForClick=false;
+        map.getContainer().style.cursor='';
+        map.getContainer().classList.remove('waiting-click');
+        document.body.classList.remove('waiting-click');document.documentElement.style.cursor='';
+        document.getElementById('los-hint').textContent='Calculant perfil elevació...';
+        var dist2Dest=RFCoverage.haversine(ptA.lat,ptA.lng,lat,lng);
+        var NSAMP2D=100;
+        var profPts=[{lat:ptA.lat,lng:ptA.lng}];
+        for(var s=1;s<NSAMP2D-1;s++){
+          var f=s/(NSAMP2D-1);
+          profPts.push({lat:ptA.lat+(lat-ptA.lat)*f,lng:ptA.lng+(lng-ptA.lng)*f});
+        }
+        profPts.push({lat:lat,lng:lng});
+        var dist2D=RFCoverage.haversine(ptA.lat,ptA.lng,lat,lng);
+        var MAPBOX_TOKEN='${MAPBOX_TOKEN}';
+        var fetchFn=RFCoverage.fetchElevations.bind(RFCoverage);
+        fetchFn(profPts).then(function(elevs){
+          console.log('[2D fetchElevations OK] elevs:',elevs);
+          var rawEA=elevs[0]||0, rawEB=elevs[elevs.length-1]||0;
+          window.lastLosElevs=[rawEA,rawEB];
+          function getBuildingHeight(la,ln){
+            var key=la.toFixed(4)+','+ln.toFixed(4);
+            if(_bldCache[key]!==undefined) return Promise.resolve(_bldCache[key]);
+            var q='[out:json][timeout:25];way(around:200,'+la+','+ln+')["height"];out tags;';
+            var ctrl=new AbortController();
+            var tid=setTimeout(function(){ctrl.abort();},25000);
+            return fetch('https://overpass.kumi.systems/api/interpreter?data='+encodeURIComponent(q),{signal:ctrl.signal})
+              .then(function(r){clearTimeout(tid);return r.json();})
+              .then(function(d){
+                for(var i=0;i<d.elements.length;i++){
+                  var h=parseFloat(d.elements[i].tags&&d.elements[i].tags.height);
+                  if(h>0){_bldCache[key]=h;return h;}
+                }
+                _bldCache[key]=2;return 2;
+              }).catch(function(){_bldCache[key]=2;return 2;});
+          }
+          Promise.resolve([0,0]).then(function(heights){
+              (function(){var el=document.getElementById('elev-a-coords');if(el)el.textContent=ptA.lat.toFixed(5)+', '+ptA.lng.toFixed(5);})();
+              var eAtext=heights[0]>2?(rawEA+heights[0]).toFixed(1)+'m ('+rawEA.toFixed(0)+'m sòl + '+heights[0].toFixed(0)+'m estructura)':rawEA.toFixed(1)+'m';
+              var eBtext=heights[1]>2?(rawEB+heights[1]).toFixed(1)+'m ('+rawEB.toFixed(0)+'m sòl + '+heights[1].toFixed(0)+'m estructura)':rawEB.toFixed(1)+'m';
+              (function(){var el=document.getElementById('elev-a-val');if(el)el.textContent=eAtext;})();
+              (function(){var el=document.getElementById('elev-b-coords');if(el)el.textContent=lat.toFixed(5)+', '+lng.toFixed(5);})();
+              (function(){var el=document.getElementById('elev-b-val');if(el)el.textContent=eBtext;})();
+              if(typeof window.runElevationProfile2D==="function"){window.runElevationProfile2D(ptA.lat,ptA.lng,rawEA,lat,lng,rawEB,dist2D,elevs,heights);}else{var _pA={lat:ptA.lat,lng:ptA.lng,alt:rawEA+heights[0]};var _pB={lat:lat,lng:lng,alt:rawEB+heights[1]};runElevationProfile(_pA,_pB);}
+            });
+        }).catch(function(err){console.error('[2D fetch ERROR]',err);});
+      }
+      return;
+    }
+    if(covMode){
+      waitingForClick=false;
+      map.getContainer().style.cursor='';
+      map.getContainer().classList.remove('waiting-click');
+      document.body.classList.remove('waiting-click');document.documentElement.style.cursor='';
+      var params=rfGetParams();
+      RFCoverage.fetchElevations([{lat:lat,lng:lng}]).then(function(elevs){
+        var elev=elevs[0]||0;
+        var node=RFMulti.addNode(lat,lng,elev,params);
+        RFMulti.calculate(node,null);
+      });
+    }
+  });
+  window.addEventListener('resize',function(){_cW=0;_cH=0;setTimeout(function(){map.invalidateSize();syncCanvas();},200);});
+  document.addEventListener('visibilitychange',function(){if(document.hidden)stopRaf();else startRaf();});
+}
+
+function makeNodeIcon(i){
+  var d=nodeData[i];
+  var isCrit=d&&d.temp>40,isWarn=d&&(d.temp>35||(d.soil!==null&&d.soil<15));
+  var cls=isCrit?'crit':isWarn?'warn':'',rc=isCrit?'#ff1744':isWarn?'#ffab40':'#00ff88';
+  return L.divIcon({className:'',
+    html:'<div style="position:relative;width:36px;height:36px;display:flex;align-items:center;justify-content:center;">'+
+      '<div class="node-pulse-ring" style="border-color:'+rc+';top:1px;left:1px;"></div>'+
+      '<div class="node-dot '+cls+'" style="position:relative;z-index:1;"></div></div>',
+    iconSize:[36,36],iconAnchor:[18,18],popupAnchor:[0,-22]});
+}
+function offlineIcon(){
+  return L.divIcon({className:'',
+    html:'<div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;position:relative;">'+
+      '<div style="position:absolute;width:34px;height:34px;border-radius:50%;border:1px dashed #333;opacity:.35;"></div>'+
+      '<div style="width:10px;height:10px;border-radius:50%;background:rgba(40,40,40,.5);border:1.5px solid #444;position:relative;z-index:1;"></div></div>',
+    iconSize:[36,36],iconAnchor:[18,18]});
+}
+function createNodeMarker(i){
+  var cfg=NODES[i];
+  var marker=L.marker([cfg.lat,cfg.lng],{icon:offlineIcon(),draggable:editMode,zIndexOffset:500}).addTo(map);
+  marker.on('dragend',function(e){
+    var p=e.target.getLatLng();NODES[i].lat=p.lat;NODES[i].lng=p.lng;
+    updateLines();updateCoordsBar();updateNodePopup(i);
+    if(selIdx===i)document.getElementById('nodeCoords').textContent=p.lat.toFixed(6)+', '+p.lng.toFixed(6);
+  });
+  marker.on('click',function(){selNode(i);});
+  var pxToM=function(px){return px/map.getZoomScale(map.getZoom(),0)*156543;};
+  var circle=L.circle([cfg.lat,cfg.lng],{radius:pxToM(10),color:'#00ff88',weight:1,dashArray:'5 4',fillColor:'#00ff88',fillOpacity:0,opacity:0}).addTo(map);
+  var line=L.polyline([[cfg.lat,cfg.lng],[GW.lat,GW.lng-0.000003]],{color:'#00e5ff',weight:1,dashArray:'4 8',opacity:.18}).addTo(map);
+  nodeMarkers[i]=marker;nodeCircles[i]=circle;nodeLines[i]=line;
+  updateNodePopup(i);
+}
+function updateNodePopup(i){
+  if(!nodeMarkers[i])return;
+  var cfg=NODES[i],d=nodeData[i];
+  var online=d&&d.rawTime&&isOnline(d.rawTime);
+  var isCrit=d&&d.temp>40,isWarn=d&&(d.temp>35||(d.soil!==null&&d.soil<15));
+  var vibrantColor=isCrit?'var(--red)':isWarn?'var(--amber)':'var(--green)';
+  var stColor=online?'var(--green)':offlineColor();
+  var stTxt=online?'● ONLINE':'○ OFFLINE (MEMÒRIA)';
+  var hasData=d&&d.temp!==null;
+  var rtColor=isCrit?'var(--red)':isWarn?'var(--amber)':hasData?'var(--green)':txtColor();
+  var rt=isCrit?'⚠ CRÍTIC':isWarn?'⚠ MODERAT':hasData?'✓ NORMAL':'—';
+  var ultimaDada=hasData?(timeSince(d.rawTime)||'—'):'—';
+  var rssiColor=txtColor(),snrColor=txtColor();
+  if(d&&d.rssi!=null)rssiColor=d.rssi>-85?'var(--green)':d.rssi>-105?'var(--amber)':'var(--red)';
+  if(d&&d.snr!=null)snrColor=d.snr>5?'var(--green)':d.snr>0?'var(--amber)':'var(--red)';
+  var batV=d&&d.bat_mv?(d.bat_mv/1000).toFixed(2)+'V':'—';
+  var batStr=d&&d.bat_pct!=null?(d.bat_pct+'% ('+batV+')'):'—';
+  var batCol=d&&d.bat_pct!=null?batColor(d.bat_pct):txtColor();
+  nodeMarkers[i].bindPopup(
+    '<div class="popup-title" style="color:'+(online?vibrantColor:txt2Color())+';text-shadow:none">◈ '+cfg.id+'</div>'+
+    '<div class="popup-row"><span>Estat</span><span class="popup-val" style="color:'+stColor+'">'+stTxt+'</span></div>'+
+    '<div class="popup-row"><span>Temperatura</span><span class="popup-val">'+(hasData?d.temp.toFixed(1)+' °C':'—')+'</span></div>'+
+    '<div class="popup-row"><span>Hum. Aire</span><span class="popup-val">'+(hasData&&d.hum!=null?d.hum.toFixed(1)+' %':'—')+'</span></div>'+
+    '<div class="popup-row"><span>Hum. Sòl</span><span class="popup-val">'+(hasData&&d.soil!=null?d.soil+' %':'—')+'</span></div>'+
+    '<div class="popup-row"><span>Risc</span><span class="popup-val" style="color:'+rtColor+'">'+rt+'</span></div>'+
+    '<div style="margin:8px 0;border-top:1px dashed rgba(128,128,128,.3);padding-top:6px;">'+
+    '<div class="popup-row" style="font-size:8.5px;"><span>Senyal (RSSI)</span><span class="popup-val" style="color:'+rssiColor+'">'+(d&&d.rssi?d.rssi+' dBm':'—')+'</span></div>'+
+    '<div class="popup-row" style="font-size:8.5px;"><span>Qualitat (SNR)</span><span class="popup-val" style="color:'+snrColor+'">'+(d&&d.snr?d.snr+' dB':'—')+'</span></div>'+
+    '<div class="popup-row" style="font-size:8.5px;"><span>Bateria</span><span class="popup-val" style="color:'+batCol+'">'+batStr+'</span></div></div>'+
+    '<div class="popup-row"><span>Última dada</span><span class="popup-val">'+ultimaDada+'</span></div>'+
+    '<div class="popup-coords">Lat: '+cfg.lat.toFixed(6)+' · Lng: '+cfg.lng.toFixed(6)+'</div>'
+  );
+}
+function updateLines(){
+  nodeMarkers.forEach(function(m,i){
+    if(!m)return;
+    var p=m.getLatLng();NODES[i].lat=p.lat;NODES[i].lng=p.lng;
+    if(nodeLines[i])nodeLines[i].setLatLngs([[p.lat,p.lng],[GW.lat,GW.lng-0.000003]]);
+    if(nodeCircles[i])nodeCircles[i].setLatLng([p.lat,p.lng]);
+  });
+}
+function updateCoordsBar(){
+  document.getElementById('coordsAll').innerHTML=NODES.map(function(c,i){
+    return '<span style="display:inline-flex;gap:4px;">'+
+      '<span style="color:rgba(0,255,136,.5)">N'+(i+1)+':</span>'+
+      '<span style="color:var(--cyan)">'+c.lat.toFixed(5)+','+c.lng.toFixed(5)+'</span>'+
+      '<span style="color:var(--txt3);font-size:8px">'+(c.deployed?'✓':'○')+'</span></span>';
+  }).join('<span style="color:var(--txt3);margin:0 5px">|</span>');
+}
+function toggleEditMode(){
+  editMode=!editMode;
+  nodeMarkers.forEach(function(m){if(m)m.dragging[editMode?'enable':'disable']();});
+  var et=document.getElementById('editToggle');
+  if(et){ et.classList.toggle('active',editMode); et.textContent=editMode?'✓ GUARDAR':'✎ MOURE NODES'; }
+  var eb=document.getElementById('editBanner');
+  if(eb) eb.classList.toggle('visible',editMode);
+  if(!editMode){updateLines();updateCoordsBar();nodeMarkers.forEach(function(_,i){updateNodePopup(i);});}
+}
+function updateMapMarkers(){
+  nodeMarkers.forEach(function(m,i){
+    if(!m)return;
+    var d=nodeData[i],online=d&&d.status==='online'&&isOnline(d.rawTime);
+    var isCrit=d&&d.temp>40,isWarn=d&&(d.temp>35||(d.soil!==null&&d.soil<15));
+    var color=isCrit?'#ff1744':isWarn?'#ffab40':'#00ff88';
+    if(online){
+      m.setIcon(makeNodeIcon(i));
+      if(nodeCircles[i])nodeCircles[i].setStyle({color:color,fillColor:color,opacity:.4,fillOpacity:.05});
+      if(nodeLines[i])nodeLines[i].setStyle({color:'#00e5ff',opacity:.18,weight:1,dashArray:'4 8'});
+    } else {
+      m.setIcon(offlineIcon());
+      if(nodeCircles[i])nodeCircles[i].setStyle({opacity:0,fillOpacity:0});
+      if(nodeLines[i])nodeLines[i].setStyle({opacity:0});
+    }
+    updateNodePopup(i);
+  });
+}
+
+// ── CESIUM 3D ─────────────────────────────────────────────────
+function initCesium3D(lat,lng,zoom){
+  Cesium.Ion.defaultAccessToken=CESIUM_TOKEN;
+  cesiumViewer=new Cesium.Viewer('cesium-map',{
+    baseLayer:Cesium.ImageryLayer.fromProviderAsync(
+      Cesium.TileMapServiceImageryProvider.fromUrl(
+        Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII'),
+        {fileExtension:'jpg'}
+      )
+    ),
+    animation:false,baseLayerPicker:false,fullscreenButton:false,
+    geocoder:false,homeButton:false,infoBox:false,
+    sceneModePicker:false,selectionIndicator:false,
+    timeline:false,navigationHelpButton:false
+  });
+
+  cesiumViewer.imageryLayers.removeAll();
+  cesiumViewer.imageryLayers.addImageryProvider(
+    new Cesium.UrlTemplateImageryProvider({
+      url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      credit:'© Esri World Imagery'
+    })
+  );
+
+  Cesium.CesiumTerrainProvider.fromIonAssetId(1).then(function(tp){
+    cesiumViewer.terrainProvider=tp;
+  });
+
+  var scene=cesiumViewer.scene;
+
+  var ctrl = scene.screenSpaceCameraController;
+  ctrl.enableTilt   = true;
+  ctrl.enableRotate = true;
+  ctrl.enableZoom   = true;
+  ctrl.enableLook   = false;
+
+  // Click esquerre = rotar/orbitar
+  ctrl.rotateEventTypes = [Cesium.CameraEventType.LEFT_DRAG];
+
+  // Click dret = inclinar (tilt) NOMÉS
+  ctrl.tiltEventTypes = [
+    Cesium.CameraEventType.RIGHT_DRAG,
+    {eventType: Cesium.CameraEventType.LEFT_DRAG, modifier: Cesium.KeyboardEventModifier.CTRL}
+  ];
+
+  // Scroll = zoom NOMÉS
+  ctrl.zoomEventTypes = [
+    Cesium.CameraEventType.WHEEL,
+    Cesium.CameraEventType.PINCH
+  ];
+
+  // Desactivar el look (que causava el zoom raro amb click dret)
+  ctrl.lookEventTypes = [];
+
+  scene.globe.enableLighting=true;
+  scene.globe.atmosphereLightIntensity=10.0;
+  scene.globe.showGroundAtmosphere=true;
+  scene.fog.enabled=true;
+  scene.fog.density=0.00025;
+  scene.skyAtmosphere.show=true;
+
+  Cesium.createGooglePhotorealistic3DTileset().then(function(tileset){
+    scene.primitives.add(tileset);
+    scene.globe.show=false;
+    hmEnable3DTools(true);
+  }).catch(function(e){
+    console.warn('Google Photorealistic no disponible:',e);
+    scene.globe.show=true;
+  });
+
+  initCesiumClickHandler();
+  cesiumViewer.camera.flyTo({
+    destination:Cesium.Cartesian3.fromDegrees(2.18590,41.45020,430),
+    orientation:{heading:Cesium.Math.toRadians(0),pitch:Cesium.Math.toRadians(-45),roll:0},
+    duration:1.8,
+    complete:function(){
+      // Si hi ha punts LOS en 2D, transferir i dibuixar en 3D
+      if(window.losPoints2D&&window.losPoints2D.length>=2){
+        var pA=window.losPoints2D[0];
+        var pB=window.losPoints2D[1];
+        losPoints=[
+          Cesium.Cartesian3.fromDegrees(pA.lng,pA.lat),
+          Cesium.Cartesian3.fromDegrees(pB.lng,pB.lat)
+        ];
+        // Dibuixar entities LOS
+        losEntityA=cesiumViewer.entities.add({
+          position:Cesium.Cartesian3.fromDegrees(pA.lng,pA.lat,10),
+          point:{pixelSize:12,color:Cesium.Color.YELLOW,outlineColor:Cesium.Color.WHITE,outlineWidth:2,heightReference:Cesium.HeightReference.CLAMP_TO_GROUND},
+          label:{text:'A',font:'bold 12px monospace',fillColor:Cesium.Color.YELLOW,outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,pixelOffset:new Cesium.Cartesian2(0,-20),heightReference:Cesium.HeightReference.CLAMP_TO_GROUND}
+        });
+        losEntityB=cesiumViewer.entities.add({
+          position:Cesium.Cartesian3.fromDegrees(pB.lng,pB.lat,10),
+          point:{pixelSize:12,color:Cesium.Color.CYAN,outlineColor:Cesium.Color.WHITE,outlineWidth:2,heightReference:Cesium.HeightReference.CLAMP_TO_GROUND},
+          label:{text:'B',font:'bold 12px monospace',fillColor:Cesium.Color.CYAN,outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,pixelOffset:new Cesium.Cartesian2(0,-20),heightReference:Cesium.HeightReference.CLAMP_TO_GROUND}
+        });
+
+      }
+    }
+  });
+
+  NODES.forEach(function(cfg,i){
+    if(!cfg.deployed)return;
+    var d=nodeData[i];
+    var isCrit=d&&d.temp>40,isWarn=d&&(d.temp>35||(d.soil!==null&&d.soil<15));
+    var color=isCrit?Cesium.Color.RED:isWarn?Cesium.Color.ORANGE:Cesium.Color.LIME;
+    cesiumViewer.entities.add({
+      position:Cesium.Cartesian3.fromDegrees(cfg.lng,cfg.lat,10),
+      point:{pixelSize:12,color:color,outlineColor:Cesium.Color.WHITE,outlineWidth:2,heightReference:Cesium.HeightReference.CLAMP_TO_GROUND},
+      label:{text:cfg.label,font:'11px Share Tech Mono',fillColor:Cesium.Color.CYAN,outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,pixelOffset:new Cesium.Cartesian2(0,-20),heightReference:Cesium.HeightReference.CLAMP_TO_GROUND}
+    });
+  });
+
+  cesiumViewer.entities.add({
+    position:Cesium.Cartesian3.fromDegrees(GW.lng,GW.lat,10),
+    point:{pixelSize:14,color:Cesium.Color.CYAN,outlineColor:Cesium.Color.WHITE,outlineWidth:2,heightReference:Cesium.HeightReference.CLAMP_TO_GROUND},
+    label:{text:'GW',font:'11px Share Tech Mono',fillColor:Cesium.Color.CYAN,outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,pixelOffset:new Cesium.Cartesian2(0,-20),heightReference:Cesium.HeightReference.CLAMP_TO_GROUND}
+  });
+}
+
+function toggleCesium3D(btn){
+  if(!is3D){
+    var c=map.getCenter(),z=map.getZoom();
+    document.getElementById('map').style.display='none';
+    document.getElementById('map').style.pointerEvents='none';
+    if(canvas)canvas.style.display='none';
+    document.getElementById('cesium-map').style.display='block';
+    if(!cesiumViewer){initCesium3D(c.lat,c.lng,z);}
+    else{
+      // Sempre volar al punt per defecte primer
+      var _destLat=41.45020,_destLng=2.18590,_destAlt=430;
+      cesiumViewer.camera.flyTo({
+        destination:Cesium.Cartesian3.fromDegrees(_destLng,_destLat,_destAlt),
+        orientation:{heading:Cesium.Math.toRadians(0),pitch:Cesium.Math.toRadians(-45),roll:0},
+        duration:1.0,
+        complete:function(){
+          if(window.losPoints2D&&window.losPoints2D.length>=2){
+            var pA=window.losPoints2D[0];var pB=window.losPoints2D[1];
+            if(losEntityA){try{cesiumViewer.entities.remove(losEntityA);}catch(e){}losEntityA=null;}
+            if(losEntityB){try{cesiumViewer.entities.remove(losEntityB);}catch(e){}losEntityB=null;}
+            if(losEntityLine){try{cesiumViewer.entities.remove(losEntityLine);}catch(e){}losEntityLine=null;}
+            losEntityA=cesiumViewer.entities.add({position:Cesium.Cartesian3.fromDegrees(pA.lng,pA.lat,10),point:{pixelSize:12,color:Cesium.Color.YELLOW,outlineColor:Cesium.Color.WHITE,outlineWidth:2,heightReference:Cesium.HeightReference.CLAMP_TO_GROUND},label:{text:'A',font:'bold 12px monospace',fillColor:Cesium.Color.YELLOW,outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,pixelOffset:new Cesium.Cartesian2(0,-20),heightReference:Cesium.HeightReference.CLAMP_TO_GROUND}});
+            losEntityB=cesiumViewer.entities.add({position:Cesium.Cartesian3.fromDegrees(pB.lng,pB.lat,10),point:{pixelSize:12,color:Cesium.Color.CYAN,outlineColor:Cesium.Color.WHITE,outlineWidth:2,heightReference:Cesium.HeightReference.CLAMP_TO_GROUND},label:{text:'B',font:'bold 12px monospace',fillColor:Cesium.Color.CYAN,outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,pixelOffset:new Cesium.Cartesian2(0,-20),heightReference:Cesium.HeightReference.CLAMP_TO_GROUND}});
+            var cPos2=[new Cesium.Cartographic(Cesium.Math.toRadians(pA.lng),Cesium.Math.toRadians(pA.lat)),new Cesium.Cartographic(Cesium.Math.toRadians(pB.lng),Cesium.Math.toRadians(pB.lat))];
+            Cesium.sampleTerrainMostDetailed(cesiumViewer.terrainProvider,cPos2).then(function(samples){
+              var altA=(samples[0].height||0)-5;var altB=(samples[1].height||0)-5;
+              if(losEntityLine){try{cesiumViewer.entities.remove(losEntityLine);}catch(e){}losEntityLine=null;}
+              losEntityLine=cesiumViewer.entities.add({polyline:{positions:[Cesium.Cartesian3.fromDegrees(pA.lng,pA.lat),Cesium.Cartesian3.fromDegrees(pB.lng,pB.lat)],width:3,material:new Cesium.ColorMaterialProperty(Cesium.Color.LIME),clampToGround:true}});
+            }).catch(function(){losEntityLine=cesiumViewer.entities.add({polyline:{positions:[Cesium.Cartesian3.fromDegrees(pA.lng,pA.lat,50),Cesium.Cartesian3.fromDegrees(pB.lng,pB.lat,50)],width:3,material:new Cesium.ColorMaterialProperty(Cesium.Color.LIME),arcType:Cesium.ArcType.NONE}});});
+            document.getElementById('elev-panel').style.display='block';
+          }
+        }
+      });
+    }
+    is3D=true;
+    document.body.classList.add('cesium-active');
+    // Moure panel i modal a cesium-map
+    var _cm3=document.getElementById('cesium-map');
+    var _pp3=document.getElementById('pn-panel');
+    var _pm3=document.getElementById('pn-modal');
+    if(_cm3&&_pp3&&_pp3.parentNode!==_cm3){_cm3.appendChild(_pp3);_pp3.style.position='absolute';_pp3.style.bottom='12px';_pp3.style.left='12px';_pp3.style.zIndex='99999';}
+    if(_cm3&&_pm3&&_pm3.parentNode!==_cm3){_cm3.appendChild(_pm3);_pm3.style.position='absolute';_pm3.style.top='0';_pm3.style.left='0';_pm3.style.width='100%';_pm3.style.height='100%';_pm3.style.zIndex='99999';}
+    // Desactivar pnMode al entrar a 3D - l'usuari el reactivarà manualment
+    if(typeof pnDeactivate==='function') pnDeactivate();
+    var _h3=document.getElementById('los-hint');if(_h3)_h3.style.display='none';
+    // Mostrar panel si hi ha nodes posats
+    setTimeout(function(){
+      if(typeof pnItems!=='undefined'&&pnItems.length>0){
+        var _pp=document.getElementById('pn-panel');if(_pp)_pp.style.display='block';
+        if(typeof pnRenderPanel==='function') pnRenderPanel();
+      }
+    },500);
+    // Restaurar LOS de 2D a 3D
+    setTimeout(function(){
+      console.log('[LOS restore] pts=',window.losPoints2D&&window.losPoints2D.length,'cesium=',!!cesiumViewer);
+      if(window.losPoints2D&&window.losPoints2D.length>=2&&cesiumViewer){
+        var pA=window.losPoints2D[0];var pB=window.losPoints2D[1];
+        if(losEntityA){try{cesiumViewer.entities.remove(losEntityA);}catch(e){}losEntityA=null;}
+        if(losEntityB){try{cesiumViewer.entities.remove(losEntityB);}catch(e){}losEntityB=null;}
+        if(losEntityLine){try{cesiumViewer.entities.remove(losEntityLine);}catch(e){}losEntityLine=null;}
+        losEntityA=cesiumViewer.entities.add({position:Cesium.Cartesian3.fromDegrees(pA.lng,pA.lat,10),point:{pixelSize:12,color:Cesium.Color.YELLOW,outlineColor:Cesium.Color.WHITE,outlineWidth:2,heightReference:Cesium.HeightReference.CLAMP_TO_GROUND},label:{text:'A',font:'bold 12px monospace',fillColor:Cesium.Color.YELLOW,outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,pixelOffset:new Cesium.Cartesian2(0,-20),heightReference:Cesium.HeightReference.CLAMP_TO_GROUND}});
+        losEntityB=cesiumViewer.entities.add({position:Cesium.Cartesian3.fromDegrees(pB.lng,pB.lat,10),point:{pixelSize:12,color:Cesium.Color.CYAN,outlineColor:Cesium.Color.WHITE,outlineWidth:2,heightReference:Cesium.HeightReference.CLAMP_TO_GROUND},label:{text:'B',font:'bold 12px monospace',fillColor:Cesium.Color.CYAN,outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,pixelOffset:new Cesium.Cartesian2(0,-20),heightReference:Cesium.HeightReference.CLAMP_TO_GROUND}});
+        var cPos=[new Cesium.Cartographic(Cesium.Math.toRadians(pA.lng),Cesium.Math.toRadians(pA.lat)),new Cesium.Cartographic(Cesium.Math.toRadians(pB.lng),Cesium.Math.toRadians(pB.lat))];
+        Cesium.sampleTerrainMostDetailed(cesiumViewer.terrainProvider,cPos).then(function(samples){
+          var altA=(samples[0].height||0)-5;
+          var altB=(samples[1].height||0)-5;
+          if(losEntityLine){try{cesiumViewer.entities.remove(losEntityLine);}catch(e){}losEntityLine=null;}
+          var p1=Cesium.Cartesian3.fromDegrees(pA.lng,pA.lat,altA);
+          var p2=Cesium.Cartesian3.fromDegrees(pB.lng,pB.lat,altB);
+          losEntityLine=cesiumViewer.entities.add({polyline:{positions:[Cesium.Cartesian3.fromDegrees(pA.lng,pA.lat),Cesium.Cartesian3.fromDegrees(pB.lng,pB.lat)],width:3,material:new Cesium.ColorMaterialProperty(Cesium.Color.LIME),clampToGround:true}});
+        }).catch(function(){
+          var p1=Cesium.Cartesian3.fromDegrees(pA.lng,pA.lat,50);
+          var p2=Cesium.Cartesian3.fromDegrees(pB.lng,pB.lat,50);
+          losEntityLine=cesiumViewer.entities.add({polyline:{positions:[Cesium.Cartesian3.fromDegrees(pA.lng,pA.lat),Cesium.Cartesian3.fromDegrees(pB.lng,pB.lat)],width:3,material:new Cesium.ColorMaterialProperty(Cesium.Color.LIME),clampToGround:true}});
+        });
+        document.getElementById('elev-panel').style.display='block';
+      }
+    },4000);
+  
+    if(btn&&btn.textContent!==undefined)btn.textContent='🗺 2D';
+    if(window.losPoints2D&&window.losPoints2D.length>=2){
+      var lh=document.getElementById('los-hint');if(lh){lh.style.display='block';}
+    } else {
+      document.getElementById('los-hint').style.display='none';
+    }
+  } else {
+    if(losPoints&&losPoints.length>=2){
+      var lh=document.getElementById('los-hint');if(lh){lh.style.display='block';}
+    } else {
+      document.getElementById('los-hint').style.display='none';
+    }
+    if(cesiumViewer){
+      var cam=cesiumViewer.camera;
+      var pos=cam.positionCartographic;
+      var lat=Cesium.Math.toDegrees(pos.latitude);
+      var lng=Cesium.Math.toDegrees(pos.longitude);
+      var alt=pos.height;
+      var z=Math.round(Math.log2(50000/Math.max(alt,1))+10);
+      z=Math.max(1,Math.min(z,20));
+      map.setView([lat,lng],z,{animate:false});
+    }
+    document.getElementById('cesium-map').style.display='none';
+    document.getElementById('map').style.pointerEvents='auto';
+    document.getElementById('map').style.display='block';
+    if(canvas)canvas.style.display='block';
+    setTimeout(function(){
+      map.invalidateSize();syncCanvas();
+      // Transferir punts LOS de 3D a 2D
+      if(losPoints&&losPoints.length>=2){
+        try{
+          var cA=Cesium.Cartographic.fromCartesian(losPoints[0]);
+          var cB=Cesium.Cartographic.fromCartesian(losPoints[1]);
+          var latA=Cesium.Math.toDegrees(cA.latitude),lngA=Cesium.Math.toDegrees(cA.longitude);
+          var latB=Cesium.Math.toDegrees(cB.latitude),lngB=Cesium.Math.toDegrees(cB.longitude);
+          window.losPoints2D=[{lat:latA,lng:lngA},{lat:latB,lng:lngB}];
+          // Dibuixar marcadors 2D
+          if(window.losMarker2DA){try{map.removeLayer(window.losMarker2DA);}catch(e){}}
+          if(window.losMarker2DB){try{map.removeLayer(window.losMarker2DB);}catch(e){}}
+          if(window.losLine2D){try{map.removeLayer(window.losLine2D);}catch(e){}}
+          window.losMarker2DA=L.circleMarker([latA,lngA],{radius:9,color:'white',weight:2,fillColor:'#ffff00',fillOpacity:1,interactive:false}).addTo(map);
+          window.losMarker2DA.bindTooltip('A',{permanent:true,direction:'top',offset:[0,-8],className:'los-label-2d los-label-a'}).openTooltip();
+          window.losMarker2DB=L.circleMarker([latB,lngB],{radius:9,color:'white',weight:2,fillColor:'#00e5ff',fillOpacity:1,interactive:false}).addTo(map);
+          window.losMarker2DB.bindTooltip('B',{permanent:true,direction:'top',offset:[0,-8],className:'los-label-2d los-label-b'}).openTooltip();
+          window.losLine2D=L.polyline([[latA,lngA],[latB,lngB]],{color:'#00ff88',weight:2.5,opacity:0.85,interactive:false}).addTo(map);
+          // Recalcular perfil elevació
+          if(typeof window.runElevationProfile2D==="function"){window.runElevationProfile2D(latA,lngA,null,latB,lngB,null,null,null,null);}
+          document.getElementById('elev-panel').style.display='block';
+        }catch(e){console.warn('Error transferint LOS 3D->2D:',e);}
+      }
+    },150);
+    is3D=false;
+    document.body.classList.remove('cesium-active');
+    if(typeof pnDeactivate==='function') pnDeactivate();
+    var _hwp=document.getElementById('hm-posar');if(_hwp){_hwp.classList.remove('active');_hwp.classList.remove('act-green');}
+    var _pndw=document.getElementById('pn-dots-wrap');if(_pndw)_pndw.style.display='none';
+    // Reset complet Posar Nodes en tornar a 2D
+    // Eliminar tots els nodes (2D i 3D) en tornar a 2D
+    if(typeof pnItems!=='undefined'){
+      pnItems.forEach(function(item){
+        if(item.marker){try{map.removeLayer(item.marker);}catch(e){}}
+      });
+      pnItems=[];
+    }
+    if(typeof pnItems3D!=='undefined'){
+      pnItems3D.forEach(function(item){
+        if(item.entity&&cesiumViewer){try{cesiumViewer.entities.remove(item.entity);}catch(e){}}
+        if(item.marker){try{map.removeLayer(item.marker);}catch(e){}}
+      });
+      pnItems3D=[];
+    }
+    // Tornar panel i modal al #map
+    var _mp=document.getElementById('map');
+    var _pp=document.getElementById('pn-panel');
+    var _pm=document.getElementById('pn-modal');
+    if(_pp&&_mp){_mp.appendChild(_pp);_pp.style.position='absolute';_pp.style.bottom='12px';_pp.style.left='12px';_pp.style.zIndex='2001';_pp.style.display='none';}
+    if(_pm&&_mp){_mp.appendChild(_pm);_pm.style.position='absolute';_pm.style.top='0';_pm.style.left='0';_pm.style.width='100%';_pm.style.height='100%';_pm.style.zIndex='9999';_pm.style.display='none';}
+    if(btn&&btn.textContent!==undefined)btn.textContent='🏔 3D';
+    // Tancar totes les eines visuals en tornar a 2D
+    if(typeof closeNDVIPanel==='function') closeNDVIPanel();
+    if(window._cesiumWindInterval){clearInterval(window._cesiumWindInterval);window._cesiumWindInterval=null;}
+    if(window._cesiumWindEntities){window._cesiumWindEntities.forEach(function(e){try{cesiumViewer.entities.remove(e);}catch(ex){}});window._cesiumWindEntities=[];}
+    windVisible=false;
+    var wb=document.getElementById('hm-wind-btn');if(wb)wb.classList.remove('active');
+    var wleg=document.getElementById('wind-legend');if(wleg)wleg.remove();
+    if(window._cesiumFirmsEntities){window._cesiumFirmsEntities.forEach(function(e){try{cesiumViewer.entities.remove(e);}catch(ex){}});window._cesiumFirmsEntities=[];}
+    if(window._cesiumGencatEntities){window._cesiumGencatEntities.forEach(function(e){try{cesiumViewer.entities.remove(e);}catch(ex){}});window._cesiumGencatEntities=[];}
+    var _pw=document.getElementById('pn-dots-wrap');if(_pw&&!pnMode)_pw.style.display='none';
+    var _pw=document.getElementById('pn-dots-wrap');if(_pw&&!pnMode)_pw.style.display='none';
+    ['hm-firms-btn','hm-ndvi-btn','hm-eonet-btn','hm-aq-btn','hm-aemet-btn','hm-meteo-btn','hm-wind-btn'].forEach(function(id){
+      var el=document.getElementById(id);if(el)el.classList.remove('active');
+    });
+  }
+}
+
+// ── CESIUM CLICK HANDLER ──────────────────────────────────────
+var losMode=false,covMode=false,losPoints=[],losPrimitives=[];
+var _bldCache={};
+var losEntityA=null,losEntityB=null,losEntityLine=null;
+var waitingForClick=false;
+
+function initCesiumClickHandler(){
+
+  var handler=new Cesium.ScreenSpaceEventHandler(cesiumViewer.canvas);
+  handler.setInputAction(function(click){
+
+    if(!losMode&&!covMode&&!pnMode)return;
+    if(pnMode&&pnCurrentType){
+      var _pos2=cesiumViewer.scene.pickPosition(click.position);
+      if(_pos2&&Cesium.defined(_pos2)){var _c2=Cesium.Cartographic.fromCartesian(_pos2);pnShowModal(Cesium.Math.toDegrees(_c2.latitude),Cesium.Math.toDegrees(_c2.longitude),pnCurrentType);}
+      return;
+    }
+    if(losMode&&!waitingForClick)return;
+    if(pnMode&&pnCurrentType){
+      var _pos2=cesiumViewer.scene.pickPosition(click.position);
+      if(_pos2&&Cesium.defined(_pos2)){var _c2=Cesium.Cartographic.fromCartesian(_pos2);pnShowModal(Cesium.Math.toDegrees(_c2.latitude),Cesium.Math.toDegrees(_c2.longitude),pnCurrentType);}
+      return;
+    }
+    if(covMode&&!waitingForClick)return;
+    // Usar scene.pickPosition per funcionar amb Google Photorealistic (globe.show=false)
+    var pos=cesiumViewer.scene.pickPosition(click.position);
+    if(!pos||!Cesium.defined(pos))return;
+    if(covMode){
+      // Convertir posicio Cesium a lat/lng i fer el mateix que en 2D
+      var carto=Cesium.Cartographic.fromCartesian(pos);
+      var lat=Cesium.Math.toDegrees(carto.latitude);
+      var lng=Cesium.Math.toDegrees(carto.longitude);
+      var elev=carto.height||0;
+      var params=rfGetParams();
+      var node=RFMulti.addNode(lat,lng,elev,params);
+      RFMulti.calculate(node, is3D ? cesiumViewer : null);
+      // Despres del click, esperar nou "+ AFEGIR NODE" igual que en 2D
+      waitingForClick=false;
+      cesiumViewer.canvas.style.cursor='default';
+      var hint=document.getElementById('los-hint');
+      if(hint){hint.textContent='📡 Calculant cobertura...';RFMulti.calculate(node, is3D ? cesiumViewer : null).then(function(){if(hint){hint.textContent='✅ Node '+node.label+' afegit. Prem "+ AFEGIR NODE" per afegir-ne un altre.';setTimeout(function(){if(hint)hint.style.display='none';},3000);}});}
+      return;
+    }
+    if(losMode){
+      if(losPoints.length===0){
+        if(losEntityA){try{cesiumViewer.entities.remove(losEntityA);}catch(e){} losEntityA=null;}
+        losEntityA=cesiumViewer.entities.add({position:pos,point:{pixelSize:12,color:Cesium.Color.YELLOW,outlineColor:Cesium.Color.WHITE,outlineWidth:2},label:{text:"A",font:"bold 12px Share Tech Mono",fillColor:Cesium.Color.YELLOW,outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,pixelOffset:new Cesium.Cartesian2(0,-22),heightReference:Cesium.HeightReference.NONE}});
+        losPoints.push(pos);
+        waitingForClick=false;
+        cesiumViewer.canvas.style.cursor="default";
+        document.getElementById("los-hint").textContent="Punt A posat. Obre menu per afegir punt B";
+      } else if(losPoints.length===1){
+        if(losEntityB){try{cesiumViewer.entities.remove(losEntityB);}catch(e){} losEntityB=null;}
+        if(losEntityLine){try{cesiumViewer.entities.remove(losEntityLine);}catch(e){} losEntityLine=null;}
+        var p1=losPoints[0],p2=pos;
+        losEntityB=cesiumViewer.entities.add({position:p2,point:{pixelSize:12,color:Cesium.Color.CYAN,outlineColor:Cesium.Color.WHITE,outlineWidth:2},label:{text:"B",font:"bold 12px Share Tech Mono",fillColor:Cesium.Color.CYAN,outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,pixelOffset:new Cesium.Cartesian2(0,-22),heightReference:Cesium.HeightReference.NONE}});
+        losEntityLine=cesiumViewer.entities.add({polyline:{positions:[p1,p2],width:2,material:new Cesium.ColorMaterialProperty(Cesium.Color.LIME.withAlpha(0.7)),arcType:Cesium.ArcType.NONE}});
+        // Fresnel zones en Cesium 3D
+        var _fN=20,_fLam=0.3/869;
+        var _cA=Cesium.Cartographic.fromCartesian(p1),_cB=Cesium.Cartographic.fromCartesian(p2);
+        var _fPtsTop=[],_fPtsBot=[];
+        for(var _fi=0;_fi<=_fN;_fi++){
+          var _ff=_fi/_fN;
+          var _fLat=Cesium.Math.toDegrees(_cA.latitude)+(_cB.latitude-_cA.latitude)*_ff*180/Math.PI;
+          var _fLng=Cesium.Math.toDegrees(_cA.longitude)+(_cB.longitude-_cA.longitude)*_ff*180/Math.PI;
+          var _fH=_cA.height+(_cB.height-_cA.height)*_ff;
+          var _fd1=_ff*300,_fd2=(1-_ff)*300;
+          var _fR=(_fd1>0&&_fd2>0)?Math.sqrt(_fLam*_fd1*_fd2/(_fd1+_fd2)):0;
+          _fPtsTop.push(Cesium.Cartesian3.fromDegrees(_fLng,_fLat,_fH+_fR*2));
+          _fPtsBot.push(Cesium.Cartesian3.fromDegrees(_fLng,_fLat,_fH-_fR*2));
+        }
+        losPrimitives.push(cesiumViewer.entities.add({polyline:{positions:_fPtsTop,width:1,material:new Cesium.PolylineDashMaterialProperty({color:Cesium.Color.CYAN.withAlpha(0.5),dashLength:12}),arcType:Cesium.ArcType.NONE}}));
+        losPrimitives.push(cesiumViewer.entities.add({polyline:{positions:_fPtsBot,width:1,material:new Cesium.PolylineDashMaterialProperty({color:Cesium.Color.CYAN.withAlpha(0.5),dashLength:12}),arcType:Cesium.ArcType.NONE}}));
+        losPoints.push(p2);
+        waitingForClick=false;
+        cesiumViewer.canvas.style.cursor="default";
+        runElevationProfile(p1,p2);
+      }
+    }
+  },Cesium.ScreenSpaceEventType.LEFT_CLICK);
+}
+var losMenuOpen = false;
+
+function toggleLOSMenu(){
+  losMenuOpen = !losMenuOpen;
+  document.getElementById('los-dots-menu').classList.toggle('open', losMenuOpen);
+}
+var rfMenuOpen = false;
+function toggleRFMenu(){
+  rfMenuOpen = !rfMenuOpen;
+  document.getElementById('rf-dots-menu').classList.toggle('open', rfMenuOpen);
+}
+
+function losAddPoint(){
+  losMenuOpen = false;
+  document.getElementById('los-dots-menu').classList.remove('open');
+  pnMenuOpen=false;
+  if(document.getElementById('pn-dots-menu'))document.getElementById('pn-dots-menu').classList.remove('open');
+  waitingForClick = true;
+  losMode = true;
+  if(cesiumViewer)cesiumViewer.canvas.style.cursor='crosshair';
+  if(typeof map!=='undefined'&&map&&!is3D){map.getContainer().style.cursor='crosshair';map.getContainer().classList.add('waiting-click');document.body.classList.add('waiting-click');document.documentElement.style.cursor='crosshair';}
+  var hint = document.getElementById('los-hint');
+  hint.style.display = 'block';
+  var _pts = is3D ? losPoints : (window.losPoints2D||[]);
+  if(_pts.length===0){
+    hint.textContent = 'Click per posar punt A (origen)';
+  } else if(_pts.length===1){
+    hint.textContent = 'Click per posar punt B (destí)';
+  } else {
+    // Reiniciar
+    if(losEntityA){ try{cesiumViewer.entities.remove(losEntityA);}catch(e){} losEntityA=null; }
+    if(losEntityB){ try{cesiumViewer.entities.remove(losEntityB);}catch(e){} losEntityB=null; }
+    if(losEntityLine){ try{cesiumViewer.entities.remove(losEntityLine);}catch(e){} losEntityLine=null; }
+    losPrimitives.forEach(function(p){try{cesiumViewer.entities.remove(p);}catch(e){try{cesiumViewer.scene.primitives.remove(p);}catch(e2){}}});
+    losPrimitives=[];
+    if(window.losMarker2DA){try{map.removeLayer(window.losMarker2DA);}catch(e){}window.losMarker2DA=null;}
+    if(window.losMarker2DB){try{map.removeLayer(window.losMarker2DB);}catch(e){}window.losMarker2DB=null;}
+    if(window.losLine2D){try{map.removeLayer(window.losLine2D);}catch(e){}window.losLine2D=null;}
+    window.losPoints2D=[];
+    document.getElementById('elev-panel').style.display='none';
+    losPoints=[];
+    elevClose();
+    hint.textContent = 'Click per posar nou punt A (origen)';
+  }
+}
+
+function losRemovePoint(){
+  losMenuOpen = false;
+  document.getElementById('los-dots-menu').classList.remove('open');
+  pnMenuOpen=false;
+  if(document.getElementById('pn-dots-menu'))document.getElementById('pn-dots-menu').classList.remove('open');
+  if(!is3D){
+    var pts=window.losPoints2D||[];
+    if(pts.length>=2){
+      if(window.losMarker2DB){try{map.removeLayer(window.losMarker2DB);}catch(e){}window.losMarker2DB=null;}
+      if(window.losLine2D){try{map.removeLayer(window.losLine2D);}catch(e){}window.losLine2D=null;}
+      window.losPoints2D.pop();
+      document.getElementById('elev-panel').style.display='none';
+      document.getElementById('los-hint').textContent='Punt A actiu. Afegeix punt B des del menu';
+    } else if(pts.length===1){
+      if(window.losMarker2DA){try{map.removeLayer(window.losMarker2DA);}catch(e){}window.losMarker2DA=null;}
+      window.losPoints2D=[];
+      map.getContainer().style.cursor='default';
+      document.getElementById('los-hint').textContent='Obre el menu per afegir punt A';
+    } else {
+      document.getElementById('los-hint').textContent='No hi ha punts per eliminar';
+    }
+    return;
+  }
+  if(losPoints.length===2){
+    if(losEntityB){ try{cesiumViewer.entities.remove(losEntityB);}catch(e){} losEntityB=null; }
+    if(losEntityLine){ try{cesiumViewer.entities.remove(losEntityLine);}catch(e){} losEntityLine=null; }
+    losPoints.pop();
+    waitingForClick=false;
+    elevClose();
+    document.getElementById('los-hint').textContent='Punt A actiu. Afegeix punt B des del menu';
+  } else if(losPoints.length===1){
+    if(losEntityA){ try{cesiumViewer.entities.remove(losEntityA);}catch(e){} losEntityA=null; }
+    losPoints=[];
+    waitingForClick=false;
+    cesiumViewer.canvas.style.cursor='default';
+    document.getElementById('los-hint').textContent='Obre el menu per afegir punt A';
+  } else {
+    document.getElementById('los-hint').textContent='No hi ha punts per eliminar';
+  }
+}
+
+// ── MENU HAMBURGUESA ──────────────────────────────────────────
+var hmOpen = false;
+
+function toggleHMenu(){
+  hmOpen = !hmOpen;
+  document.getElementById('hmenu-panel').classList.toggle('open', hmOpen);
+  // No treure waiting-click aquí — el gestiona el click handler
+}
+function closeHMenu(){
+  hmOpen = false;
+  document.getElementById('hmenu-panel').classList.remove('open');
+}
+
+function hmSetMap(mode){
+  var cp=document.getElementById("coords-panel");if(cp)cp.remove();
+  ["firms-panel","ndvi-panel","power-panel","eonet-panel","burned-panel","aq-panel","aemet-panel"].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display="none";});
+  // Guardar i restaurar botons actius i panels al canviar de mapa
+  // Guardar estat ABANS de tancar res
+  var _activeIds=[];
+  document.querySelectorAll(".hm-btn.active").forEach(function(b){if(b.id)_activeIds.push(b.id);});
+  var _panelIds=["elev-panel","firms-panel","ndvi-panel","power-panel","eonet-panel","burned-panel","aq-panel","aemet-panel","wind-legend"];
+  var _pnw=document.getElementById("pn-dots-wrap");if(_pnw&&!pnMode)_pnw.style.display="none";
+  var _pnp=document.getElementById("pn-panel");if(_pnp&&!pnMode)_pnp.style.display="none";
+  var _visiblePanels=_panelIds.filter(function(id){var el=document.getElementById(id);return el&&(el.style.display==='block'||el.style.display==='flex');});
+  document.querySelectorAll(".hm-btn.active").forEach(function(b){b.classList.remove("active");});
+  closeHMenu();
+  // Amaga panel LOS NOMÉS al canviar a/des de 3D si no hi ha punts
+  if(mode==='3d'||mode==='2d'){
+    var hasLOS2D=window.losPoints2D&&window.losPoints2D.length>=2;
+    var hasLOS3D=window.losPoints&&window.losPoints.length>=2;
+    if(!hasLOS2D&&!hasLOS3D) document.getElementById('elev-panel').style.display='none';
+    document.getElementById('los-hint').style.display='none';
+  }
+
+
+
+
+  // Si estem en mode edicio, desactivar-lo primer
+  if(editMode){
+    toggleEditMode();
+    ['hm-edit-txt-c','hm-edit-txt-s'].forEach(function(id){
+      var el=document.getElementById(id); if(el) el.textContent='Moure Nodes';
+    });
+    ['hm-edit-icon-c','hm-edit-icon-s'].forEach(function(id){
+      var el=document.getElementById(id); if(el) el.textContent='✎';
+    });
+  }
+  // Restaurar posicions originals
+  NODES.forEach(function(n,i){
+    if(NODES_ORIG[i]){ n.lat=NODES_ORIG[i].lat; n.lng=NODES_ORIG[i].lng; }
+    if(nodeMarkers[i]) nodeMarkers[i].setLatLng([n.lat,n.lng]);
+    if(nodeLines[i]) nodeLines[i].setLatLngs([[n.lat,n.lng],[GW.lat,GW.lng-0.000003]]);
+    if(nodeCircles[i]) nodeCircles[i].setLatLng([n.lat,n.lng]);
+  });
+  updateCoordsBar();
+
+  if(mode==='3d'){
+    // Anar a 3D des de sat
+    if(currentMap!=='sat'){ map.removeLayer(cartoLayer); satelliteLayer.addTo(map); currentMap='sat'; }
+    toggleCesium3D(btn3d);
+    ['hm-firms-btn','hm-ndvi-btn','hm-eonet-btn','hm-aq-btn','hm-aemet-btn','hm-meteo-btn','hm-wind-btn','hm-power-btn','hm-burned-btn','hm-posar'].forEach(function(id){var el=document.getElementById(id);if(el){el.classList.remove('active');el.classList.remove('act-green');}});
+    var _pndw=document.getElementById('pn-dots-wrap');if(_pndw&&!pnMode)_pndw.style.display='none';
+    var _ldw=document.getElementById('los-dots-wrap');if(_ldw&&!losMode)_ldw.style.display='none';
+    var _rdw=document.getElementById('rf-dots-wrap');if(_rdw&&!covMode)_rdw.style.display='none';
+    // Si pnMode actiu, mantenir panel i dots-wrap
+    if(pnMode){
+      if(_pndw)_pndw.style.display='block';
+      var _pp3=document.getElementById('pn-panel');if(_pp3)_pp3.style.display='block';
+      var _hint3=document.getElementById('los-hint');
+      if(_hint3){
+        if(pnCurrentType){
+          var _icons3={gateway:'📡',sensor:'🌡',torre:'🗼'};
+          var _labels3={gateway:'Gateway',sensor:'Node Sensor',torre:'Torre'};
+          _hint3.textContent=_icons3[pnCurrentType]+' Clica al mapa per posar '+_labels3[pnCurrentType];
+        } else {
+          _hint3.textContent='📍 Obre el menú ⋮ per seleccionar tipus';
+        }
+        _hint3.style.display='block';
+      }
+    }
+    document.getElementById('hm-view-carto').style.display='none';
+    document.getElementById('hm-view-sat').style.display='none';
+    document.getElementById('hm-view-3d').style.display='block';
+    return;
+  }
+
+  if(mode==='2d'){
+    // Tornar a sat des de 3D
+    if(is3D) toggleCesium3D(btn3d);
+    document.getElementById('hm-view-carto').style.display='none';
+    document.getElementById('hm-view-sat').style.display='block';
+    document.getElementById('hm-view-3d').style.display='none';
+    _activeIds.forEach(function(id){if(id==='hm-posar')return;var el=document.getElementById(id);if(el)el.classList.add('active');});
+    _visiblePanels.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='block';});
+    return;
+  }
+
+  if(mode==='carto'){
+    if(is3D) toggleCesium3D(btn3d);
+    if(currentMap==='sat'){ map.removeLayer(satelliteLayer); cartoLayer.addTo(map); currentMap='carto'; }
+    document.getElementById('hm-view-carto').style.display='block';
+    document.getElementById('hm-view-sat').style.display='none';
+    document.getElementById('hm-view-3d').style.display='none';
+    _activeIds.forEach(function(id){if(id==='hm-posar')return;var el=document.getElementById(id);if(el)el.classList.add('active');});
+    _visiblePanels.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='block';});
+    return;
+  }
+
+  if(mode==='sat'){
+    if(currentMap==='carto'){ map.removeLayer(cartoLayer); satelliteLayer.addTo(map); currentMap='sat'; }
+    document.getElementById('hm-view-carto').style.display='none';
+    document.getElementById('hm-view-sat').style.display='block';
+    document.getElementById('hm-view-3d').style.display='none';
+    _activeIds.forEach(function(id){if(id==='hm-posar')return;var el=document.getElementById(id);if(el)el.classList.add('active');});
+    _visiblePanels.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='block';});
+    return;
+  }
+}
+
+function hmEnable3DTools(on){
+  ['hm-los','hm-cov'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.disabled=!on;
+  });
+}
+
+function hmEdit(){
+  // Tancar menu primer
+  hmOpen = false;
+  document.getElementById('hmenu-panel').classList.remove('open');
+
+  // Canviar mode
+  toggleEditMode();
+
+  // Actualitzar text per la propera vegada que s'obri el menu
+  // editMode ja es el nou valor
+  var txt  = editMode ? 'Guardar Posició' : 'Moure Nodes';
+  var icon = editMode ? '✓' : '✎';
+  ['hm-edit-txt-c','hm-edit-txt-s'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.textContent=txt;
+  });
+  ['hm-edit-icon-c','hm-edit-icon-s'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.textContent=icon;
+  });
+}
+
+function hmLOS(){
+  if(typeof pnDeactivate==='function') pnDeactivate();
+  var wasLOS=losMode;
+  closeAllTools();
+  covMode=false;
+  var hcov=document.getElementById('hm-cov');
+  if(hcov)hcov.classList.remove('active');
+  losMode=!wasLOS; losPoints=[];
+  var hint=document.getElementById('los-hint');
+  if(losMode){
+    var hlos=document.getElementById('hm-los');
+    if(hlos)hlos.classList.add('active');
+    document.getElementById('los-dots-wrap').style.display='block';
+    var _rw=document.getElementById('rf-dots-wrap');if(_rw)_rw.style.display='none';
+    var _pw=document.getElementById('pn-dots-wrap');if(_pw&&!pnMode)_pw.style.display='none';
+    rfMenuOpen=false;var _rm=document.getElementById('rf-dots-menu');if(_rm)_rm.classList.remove('open');
+    hideLeafletZoom();
+    hint.style.display='block';
+    hint.textContent='Obre el menú ⋮ per afegir punt';
+    if(cesiumViewer)cesiumViewer.canvas.style.cursor='default';
+  } else {
+    var hlos=document.getElementById('hm-los');
+    if(hlos)hlos.classList.remove('active');
+    hint.style.display='none';
+    if(cesiumViewer)cesiumViewer.canvas.style.cursor='';
+    showLeafletZoom();
+    document.getElementById('los-dots-wrap').style.display='none';
+  }
+  closeHMenu();
+}
+
+function hmCOV(){
+  if(typeof pnDeactivate==='function') pnDeactivate();
+  var wasCOV=covMode;
+  closeAllTools();
+  losMode=false;
+  var hlos=document.getElementById('hm-los');
+  if(hlos)hlos.classList.remove('active');
+  covMode=!wasCOV;
+  var hint=document.getElementById('los-hint');
+  if(covMode){
+    var hcov=document.getElementById('hm-cov');
+    if(hcov)hcov.classList.add('active');
+    hint.style.display='none';
+    hideLeafletZoom();
+    if(cesiumViewer)cesiumViewer.canvas.style.cursor='default';
+    var rw=document.getElementById('rf-dots-wrap');
+    if(rw)rw.style.display='block';
+    var _lw=document.getElementById('los-dots-wrap');if(_lw&&!losMode)_lw.style.display='none';
+    document.getElementById('los-dots-menu').classList.remove('open');
+    closeHMenu();
+  } else {
+    var hcov=document.getElementById('hm-cov');
+    if(hcov)hcov.classList.remove('active');
+    hint.style.display='none';
+    if(cesiumViewer)cesiumViewer.canvas.style.cursor='';
+    showLeafletZoom();
+    var rw=document.getElementById('rf-dots-wrap');
+    if(rw)rw.style.display='none';
+    rfMenuOpen=false;
+    var rm=document.getElementById('rf-dots-menu');
+    if(rm)rm.classList.remove('open');
+    closeHMenu();
+  }
+}
+function hmClear(){
+  // Limpiar 2D
+  if(window.losMarker2DA){try{map.removeLayer(window.losMarker2DA);}catch(e){}window.losMarker2DA=null;}
+  if(window.losMarker2DB){try{map.removeLayer(window.losMarker2DB);}catch(e){}window.losMarker2DB=null;}
+  if(window.losLine2D){try{map.removeLayer(window.losLine2D);}catch(e){}window.losLine2D=null;}
+  window.losPoints2D=[];
+  if(typeof map!=='undefined'&&map)map.getContainer().style.cursor='default';
+  // Limpiar 3D
+  if(cesiumViewer){
+    losPrimitives.forEach(function(p){try{cesiumViewer.entities.remove(p);}catch(e){try{cesiumViewer.scene.primitives.remove(p);}catch(e2){}}});
+    if(losEntityA){try{cesiumViewer.entities.remove(losEntityA);}catch(e){}losEntityA=null;}
+    if(losEntityB){try{cesiumViewer.entities.remove(losEntityB);}catch(e){}losEntityB=null;}
+    if(losEntityLine){try{cesiumViewer.entities.remove(losEntityLine);}catch(e){}losEntityLine=null;}
+    cesiumViewer.canvas.style.cursor='default';
+  }
+  losPrimitives=[];losPoints=[];waitingForClick=false;
+  losMode=false;covMode=false;
+  var hlos=document.getElementById("hm-los");
+  var hcov=document.getElementById("hm-cov");
+  if(hlos)hlos.className="hm-btn";
+  if(hcov)hcov.className="hm-btn";
+  var _lh=document.getElementById("los-hint");if(_lh)_lh.style.display="none";
+  var _lw=document.getElementById("los-dots-wrap");if(_lw)_lw.style.display="none";
+  var _rw=document.getElementById("rf-dots-wrap");if(_rw)_rw.style.display="none";
+  showLeafletZoom();
+  showToolInfo(null);
+  elevClose();
+}
+
+// ── PANEL ELEVACIO / LOS AVANÇAT ─────────────────────────────
+var elevChart = null;
+var elevFreq = 869; // MHz
+var elevData = null;
+var LOS_SAMPLES = 60;
+
+function elevClose(){
+  var _rfl=document.getElementById('rf-legend');if(_rfl)_rfl.style.visibility='';
+  document.getElementById('elev-panel').style.display='none';
+  if(elevChart){ elevChart.destroy(); elevChart=null; }
+  var lh=document.getElementById('los-hint');if(lh)lh.style.display='none';
+}
+
+function elevConfig(){
+  var f = prompt('Freqüència (MHz):', elevFreq);
+  if(f && !isNaN(f)){ elevFreq = parseFloat(f); if(elevData) renderElevPanel(elevData); }
+}
+
+function elevSave(){
+  if(!elevChart) return;
+  var canvas = document.getElementById('elev-chart');
+  // Fons negre per al PNG
+  var exportCanvas = document.createElement('canvas');
+  exportCanvas.width = canvas.width;
+  exportCanvas.height = canvas.height;
+  var ctx2 = exportCanvas.getContext('2d');
+  ctx2.fillStyle = 'rgba(4,14,22,1)';
+  ctx2.fillRect(0,0,exportCanvas.width,exportCanvas.height);
+  ctx2.drawImage(canvas,0,0);
+  var a = document.createElement('a');
+  a.href = exportCanvas.toDataURL('image/png');
+  a.download = 'los_profile.png';
+  a.click();
+}
+
+// FSPL
+function calcFSPL(distM, freqMHz){
+  return 20*Math.log10(distM) + 20*Math.log10(freqMHz*1e6) - 147.55;
+}
+
+// Fresnel radius
+function fresnelR(d1, d2, freqMHz){
+  var lambda = 3e8 / (freqMHz * 1e6);
+  if(d1 <= 0 || d2 <= 0) return 0;
+  var r = Math.sqrt(lambda * d1 * d2 / (d1 + d2));
+  var dist = d1 + d2;
+  var visMin = Math.min(dist * 0.05, 35) * Math.sin(Math.PI * d1 / dist);
+  return Math.max(r, visMin);
+}
+// Genera array de Fresnel amb forma el·liptica correcta afegint punts extra als extrems
+function fresnelArray(distances, losHeights, dist, freqMHz, sign){
+  var arr = distances.map(function(d, i){
+    var d1=d, d2=dist-d;
+    if(d1<=0||d2<=0) return losHeights[i];
+    return losHeights[i] + sign * fresnelR(d1, d2, freqMHz);
+  });
+  // Inserir punts just despres del primer i just abans de l'ultim
+  // per forcar la corba a pujar/baixar des del punt
+  var step = dist / distances.length;
+  var d1s = step * 0.5;
+  var r1 = fresnelR(d1s, dist - d1s, freqMHz);
+  arr[0] = losHeights[0]; // extrem = 0
+  arr[1] = losHeights[1] + sign * r1 * 0.3; // segon punt petit per forcar curvatura
+  return arr;
+}
+
+async function runElevationProfile(posA, posB){
+  if(!cesiumViewer) return;
+  var scene = cesiumViewer.scene;
+
+  var cartA = Cesium.Cartographic.fromCartesian(posA);
+  var cartB = Cesium.Cartographic.fromCartesian(posB);
+
+  var latA = Cesium.Math.toDegrees(cartA.latitude);
+  var lngA = Cesium.Math.toDegrees(cartA.longitude);
+  var latB = Cesium.Math.toDegrees(cartB.latitude);
+  var lngB = Cesium.Math.toDegrees(cartB.longitude);
+
+  var elevA = cartA.height;
+  var elevB = cartB.height;
+
+  // Total distance
+  var distTotal = Cesium.Cartesian3.distance(posA, posB);
+
+  // Show panel
+  document.getElementById('elev-panel').style.display='block';
+  if(typeof closeAllNasaPanels==='function') closeAllNasaPanels();
+  var _rfl=document.getElementById('rf-legend');if(_rfl)_rfl.style.visibility='hidden';
+  var fspl=calcFSPL(distTotal,elevFreq);
+  function ss(id,v){var el=document.getElementById(id);if(el)el.textContent=v;}
+  var _ia3=document.getElementById('elev-info-a');
+  var _ib3=document.getElementById('elev-info-b');
+  var _irf3=document.getElementById('elev-info-rf');
+  if(_ia3)_ia3.innerHTML='<span style="color:#5b9bd5 !important">Origen A:</span> <span id="elev-a-coords" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#5b9bd5 !important">Elev:</span> <span id="elev-a-val" style="color:#fff !important">—</span>';
+  if(_ib3)_ib3.innerHTML='<span style="color:#5b9bd5 !important">Destí B:</span> <span id="elev-b-coords" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#5b9bd5 !important">Elev:</span> <span id="elev-b-val" style="color:#fff !important">—</span>';
+  if(_irf3)_irf3.innerHTML='<span style="color:#ff9800 !important">RF:</span> <span id="elev-rf-freq" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#ff9800 !important">Dist:</span> <span id="elev-rf-dist" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#ff9800 !important">FSPL:</span> <span id="elev-rf-fspl" style="color:#fff !important">—</span> <span style="color:#555 !important">|</span> <span style="color:#ff9800 !important">Refrac:</span> <span id="elev-rf-refrac" style="color:#fff !important">0.25</span>';
+  ss('elev-a-coords',latA.toFixed(5)+', '+lngA.toFixed(5));
+  Promise.all([getBuildingHeight(latA,lngA),getBuildingHeight(latB,lngB)]).then(function(bh){
+    var bhA=bh[0]||0,bhB=bh[1]||0;
+    // Collserola tower hardcoded height
+    var collsLat=41.41702,collsLng=2.11436;
+    var dA=Math.sqrt(Math.pow(latA-collsLat,2)+Math.pow(lngA-collsLng,2));
+    var dB=Math.sqrt(Math.pow(latB-collsLat,2)+Math.pow(lngB-collsLng,2));
+    if(dA<0.0001) bhA=288;
+    if(dB<0.0001) bhB=288;
+    var eAr2=eA+bhA,eBr2=eB+bhB;
+    ss('elev-a-val',bhA>2?eAr2.toFixed(1)+'m ('+eA.toFixed(0)+'m sol + '+bhA.toFixed(0)+'m estructura)':eA.toFixed(1)+'m');
+    ss('elev-b-val',bhB>2?eBr2.toFixed(1)+'m ('+eB.toFixed(0)+'m sol + '+bhB.toFixed(0)+'m estructura)':eB.toFixed(1)+'m');
+  });
+  ss('elev-b-coords',latB.toFixed(5)+', '+lngB.toFixed(5));
+  ss('elev-rf-freq',elevFreq+'MHz');
+  ss('elev-rf-dist',(distTotal/1000).toFixed(2)+'km');
+  ss('elev-rf-fspl',fspl.toFixed(1)+'dB');
+  document.getElementById('los-hint').textContent='Calculant perfil...';
+  for(var i=0; i<=LOS_SAMPLES; i++){
+    var t = i/LOS_SAMPLES;
+    var pos = Cesium.Cartesian3.lerp(posA, posB, t, new Cesium.Cartesian3());
+    positions.push(pos);
+    distances.push(t * distTotal);
+  }
+
+  // Sample terreny amb Cesium sampleTerrainMostDetailed (2D)
+  try {
+    var sampledHeights = await Cesium.sampleTerrainMostDetailed(
+      cesiumViewer.terrainProvider,
+      positions.map(function(p){
+        var c = Cesium.Cartographic.fromCartesian(p);
+        return new Cesium.Cartographic(c.longitude, c.latitude);
+      })
+    );
+    heights = sampledHeights.map(function(c){ return c.height || 0; });
+  } catch(e) {
+    heights = positions.map(function(p){
+      return Cesium.Cartographic.fromCartesian(p).height || 0;
+    });
+  }
+
+  // LOS heights A→B - afegir estructura si és la torre de Collserola
+  var _collsLat=41.41702,_collsLng=2.11436;
+  var _bhA=0,_bhB=0;
+  var _geoid=49; // Ondulació geoide Barcelona (WGS84 - orthomètric)
+  if(Math.sqrt(Math.pow(latA-_collsLat,2)+Math.pow(lngA-_collsLng,2))<0.0001)_bhA=288;
+  if(Math.sqrt(Math.pow(latB-_collsLat,2)+Math.pow(lngB-_collsLng,2))<0.0001)_bhB=288;
+  elevA=elevA-_geoid; elevB=elevB-_geoid;
+  heights=heights.map(function(h){return h-_geoid;});
+  console.log('[3D heights] h[0]=',heights[0],' elevAlos=',elevAlos,' diff=',elevAlos-heights[0]);
+  var elevAlos=elevA+_bhA, elevBlos=elevB+_bhB;
+  var losHeights = distances.map(function(d){
+    return elevAlos + (elevBlos - elevAlos) * (d / distTotal);
+  });
+
+  // Detect obstructions
+  var firstObstruction = -1;
+  for(var i=0; i<heights.length; i++){
+    if(heights[i] > losHeights[i] + 8){
+      firstObstruction = i;
+      break;
+    }
+  }
+
+  // Fresnel zones
+  var _frMid2=fresnelR(distTotal/2,distTotal/2,elevFreq);
+  var _frMid2z2=_frMid2*Math.sqrt(2);
+  var _frMid2z3=_frMid2*Math.sqrt(3);
+  var fresnelTop = distances.map(function(d, i){
+    return losHeights[i]+_frMid2*Math.sin(Math.PI*d/distTotal);
+  });
+  var fresnelBot = distances.map(function(d, i){
+    return losHeights[i]-_frMid2*Math.sin(Math.PI*d/distTotal);
+  });
+  var fresnelTop2 = distances.map(function(d, i){
+    return losHeights[i]+_frMid2z2*Math.sin(Math.PI*d/distTotal);
+  });
+  var fresnelBot2 = distances.map(function(d, i){
+    return losHeights[i]-_frMid2z2*Math.sin(Math.PI*d/distTotal);
+  });
+  var fresnelTop3 = distances.map(function(d, i){
+    return losHeights[i]+_frMid2z3*Math.sin(Math.PI*d/distTotal);
+  });
+  var fresnelBot3 = distances.map(function(d, i){
+    return losHeights[i]-_frMid2z3*Math.sin(Math.PI*d/distTotal);
+  });
+
+
+  // Save data
+  elevData = {
+    distTotal: distTotal, freq: elevFreq, fspl: fspl,
+    pointA: {lat:latA,lng:lngA,elev:elevA},
+    pointB: {lat:latB,lng:lngB,elev:elevB},
+    samples: distances.map(function(d,i){
+      return {dist:d,terrain:heights[i],los:losHeights[i]};
+    })
+  };
+
+  renderElevPanel({
+    distances: distances, heights: heights,
+    losHeights: losHeights, firstObstruction: firstObstruction,
+    fresnelTop: fresnelTop, fresnelBot: fresnelBot, fresnelTop2: fresnelTop2, fresnelBot2: fresnelBot2, fresnelTop3: fresnelTop3, fresnelBot3: fresnelBot3, eAreal: elevAlos, eBreal: elevBlos
+  });
+
+  document.getElementById('los-hint').textContent =
+    firstObstruction>=0 ? '🔴 OBSTRUÏDA — Obstrucció a '+(distances[firstObstruction]/1000).toFixed(2)+'km' : '🟢 LLIURE — Visió directa OK';
+}
+
+function renderElevPanel(d){
+  if(elevChart){ elevChart.destroy(); elevChart=null; }
+  var ctx = document.getElementById('elev-chart').getContext('2d');
+
+  // LOS colors - verd fins obstrucció, vermell després
+  var losColors = d.distances.map(function(_,i){
+    return (d.firstObstruction>=0 && i>=d.firstObstruction) ? 'rgba(255,23,68,1)' : 'rgba(0,255,136,1)';
+  });
+
+  var _distRef2 = d.distTotal || d.distances[d.distances.length-1];
+  var _fr1real = fresnelR(_distRef2/2,_distRef2/2,elevFreq);
+  var _fr1vis = _fr1real;
+  // Zones 2 i 3 - radis correctes: r_n = r1 * sqrt(n)
+  var _fr2 = _fr1vis * Math.sqrt(2);
+  var _fr3 = _fr1vis * Math.sqrt(3);
+  window._fresnelDrawData = {
+    top: d.fresnelTop, bot: d.fresnelBot,
+    top2: d.distances.map(function(d2,i){return d.losHeights[i]+_fr2*Math.sin(Math.PI*d2/_distRef2);}),
+    bot2: d.distances.map(function(d2,i){return d.losHeights[i]-_fr2*Math.sin(Math.PI*d2/_distRef2);}),
+    top3: d.distances.map(function(d2,i){return d.losHeights[i]+_fr3*Math.sin(Math.PI*d2/_distRef2);}),
+    bot3: d.distances.map(function(d2,i){return d.losHeights[i]-_fr3*Math.sin(Math.PI*d2/_distRef2);})
+  };
+  elevChart = new Chart(ctx, {
+    type: 'line',
+    plugins: [window._fresnelEllipsePlugin],
+    data: {
+      labels: d.distances.map(function(v){ return (v/1000).toFixed(2); }),
+      datasets: [
+        // Terreny - exacte MeshCore amb gradient
+        {
+          label: 'Terreny',
+          data: d.heights,
+          fill: 'origin',
+          backgroundColor: (function(){
+            var el=document.getElementById('elev-chart');
+            var c=el.getContext('2d');
+            var h=el.offsetHeight||220;
+            var g=c.createLinearGradient(0,0,0,h);
+            g.addColorStop(0,'rgba(140,95,45,1)');
+            g.addColorStop(0.45,'rgba(90,62,27,.55)');
+            g.addColorStop(1,'rgba(20,10,5,.1)');
+            return g;
+          })(),
+          borderColor: '#c8a84b',
+          borderWidth: 1.5,
+          pointRadius: 0, tension: 0.3, order: 4
+        },
+        // Punt A/B estructura (forçar escala Y correcta)
+        {
+          label: 'Estructura',
+          data: d.distances.map(function(_,i){
+            if(i===0) return d.eAreal||d.losHeights[0];
+            if(i===d.distances.length-1) return d.eBreal||d.losHeights[d.losHeights.length-1];
+            return null;
+          }),
+          fill: false, borderColor: 'transparent',
+          pointRadius: 0, tension: 0, order: 0, spanGaps: false
+        },
+        // LOS
+        {
+          label: 'LOS',
+          data: d.losHeights,
+          fill: false,
+          borderColor: '#ff4444',
+          borderWidth: 2.5,
+          pointRadius: function(ctx){
+            var i=ctx.dataIndex,n=d.distances.length-1;
+            return (i===0||i===n)?6:0;
+          },
+          pointBackgroundColor: '#00e5ff',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          pointStyle: 'circle',
+          tension: 0, order: 1
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: {duration: 400},
+      plugins: {
+        legend: {display: false},
+
+        tooltip: {
+          mode: 'index', intersect: false,
+          backgroundColor: 'rgba(4,14,22,.95)',
+          borderColor: 'rgba(0,229,255,.3)', borderWidth: 1,
+          titleColor: '#00e5ff', bodyColor: 'rgba(0,229,255,.7)',
+          titleFont: {family:'Share Tech Mono', size:9},
+          bodyFont: {family:'Share Tech Mono', size:8},
+          callbacks: {
+            title: function(items){ return 'Dist: '+items[0].label+'km'; },
+            label: function(item){
+              if(item.datasetIndex===0) return 'Terreny: '+item.raw.toFixed(1)+'m';
+              if(item.datasetIndex===3) return 'LOS: '+item.raw.toFixed(1)+'m';
+              return null;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: {color:'rgba(0,229,255,.06)'},
+          ticks: {color:'rgba(0,229,255,.5)',font:{family:'Share Tech Mono',size:8},
+            maxTicksLimit:8,
+            callback:function(v,i){ return d.distances[i]?(d.distances[i]/1000).toFixed(1)+'km':null; }
+          },
+          title: {display:true,text:'Distància (km)',color:'rgba(0,229,255,.4)',
+            font:{family:'Share Tech Mono',size:8}}
+        },
+        y: {
+          min: (function(){
+            var allVals=d.heights.concat(d.losHeights).concat(d.fresnelBot3||[]).filter(function(v){return v!=null&&!isNaN(v);});
+            if(d.eAreal) allVals.push(d.eAreal);
+            if(d.eBreal) allVals.push(d.eBreal);
+            var mn=Math.min.apply(null,allVals);
+            var mx=Math.max.apply(null,allVals);
+            var pad=Math.max(20, Math.round((mx-mn)*0.15));
+            return Math.floor((mn-pad)/10)*10;
+          })(),
+          max: (function(){
+            var allVals=d.heights.concat(d.losHeights).concat(d.fresnelTop3||[]).filter(function(v){return v!=null&&!isNaN(v);});
+            if(d.eAreal) allVals.push(d.eAreal);
+            if(d.eBreal) allVals.push(d.eBreal);
+            var mx=Math.max.apply(null,allVals);
+            var mn=Math.min.apply(null,allVals);
+            var pad=Math.max(20, Math.round((mx-mn)*0.15));
+            return Math.ceil((mx+pad)/10)*10;
+          })(),
+          grid: {color:'rgba(0,229,255,.06)'},
+          ticks: {color:'rgba(0,229,255,.5)',font:{family:'Share Tech Mono',size:8},
+            callback:function(v){ return v.toFixed(0)+'m'; }
+          },
+          title: {display:true,text:'Elevació (m)',color:'rgba(0,229,255,.4)',
+            font:{family:'Share Tech Mono',size:8}}
+        }
+      }
+    }
+  });
+}
+
+function hmSetMap(mode){
+  console.log("[hmSetMap2 START]",mode);
+  var cp=document.getElementById("coords-panel");if(cp)cp.remove();
+  // Guardar i restaurar botons actius i panels al canviar de mapa
+  // Guardar estat ABANS de tancar res
+  var _activeIds=[];
+  document.querySelectorAll(".hm-btn.active").forEach(function(b){if(b.id)_activeIds.push(b.id);});
+  var _panelIds=["elev-panel","firms-panel","ndvi-panel","power-panel","eonet-panel","burned-panel","aq-panel","aemet-panel","wind-legend"];
+  var _pnw=document.getElementById("pn-dots-wrap");if(_pnw&&!pnMode)_pnw.style.display="none";
+  var _pnp=document.getElementById("pn-panel");if(_pnp&&!pnMode)_pnp.style.display="none";
+  var _visiblePanels=_panelIds.filter(function(id){var el=document.getElementById(id);return el&&(el.style.display==='block'||el.style.display==='flex');});
+  ["firms-panel","ndvi-panel","power-panel","eonet-panel","burned-panel","aq-panel","aemet-panel"].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display="none";});
+  document.querySelectorAll(".hm-btn.active").forEach(function(b){b.classList.remove("active");});
+  closeHMenu();
+  // Amaga panel LOS NOMÉS al canviar a/des de 3D si no hi ha punts
+  if(mode==='3d'||mode==='2d'){
+    var hasLOS2D=window.losPoints2D&&window.losPoints2D.length>=2;
+    var hasLOS3D=window.losPoints&&window.losPoints.length>=2;
+    if(!hasLOS2D&&!hasLOS3D) document.getElementById('elev-panel').style.display='none';
+    document.getElementById('los-hint').style.display='none';
+  }
+
+
+
+
+  // Si estem en mode edicio, desactivar-lo primer
+  if(editMode){
+    toggleEditMode();
+    ['hm-edit-txt-c','hm-edit-txt-s'].forEach(function(id){
+      var el=document.getElementById(id); if(el) el.textContent='Moure Nodes';
+    });
+    ['hm-edit-icon-c','hm-edit-icon-s'].forEach(function(id){
+      var el=document.getElementById(id); if(el) el.textContent='✎';
+    });
+  }
+  // Restaurar posicions originals
+  NODES.forEach(function(n,i){
+    if(NODES_ORIG[i]){ n.lat=NODES_ORIG[i].lat; n.lng=NODES_ORIG[i].lng; }
+    if(nodeMarkers[i]) nodeMarkers[i].setLatLng([n.lat,n.lng]);
+    if(nodeLines[i]) nodeLines[i].setLatLngs([[n.lat,n.lng],[GW.lat,GW.lng-0.000003]]);
+    if(nodeCircles[i]) nodeCircles[i].setLatLng([n.lat,n.lng]);
+  });
+  updateCoordsBar();
+
+  if(mode==='3d'){
+    // Anar a 3D des de sat
+    if(currentMap!=='sat'){ map.removeLayer(cartoLayer); satelliteLayer.addTo(map); currentMap='sat'; }
+    toggleCesium3D(btn3d);
+    ['hm-firms-btn','hm-ndvi-btn','hm-eonet-btn','hm-aq-btn','hm-aemet-btn','hm-meteo-btn','hm-wind-btn','hm-power-btn','hm-burned-btn','hm-posar'].forEach(function(id){var el=document.getElementById(id);if(el){el.classList.remove('active');el.classList.remove('act-green');}});
+    var _pndw=document.getElementById('pn-dots-wrap');if(_pndw&&!pnMode)_pndw.style.display='none';
+    var _ldw=document.getElementById('los-dots-wrap');if(_ldw&&!losMode)_ldw.style.display='none';
+    var _rdw=document.getElementById('rf-dots-wrap');if(_rdw&&!covMode)_rdw.style.display='none';
+    // Si pnMode actiu, mantenir panel i dots-wrap
+    if(pnMode){
+      if(_pndw)_pndw.style.display='block';
+      var _pp3=document.getElementById('pn-panel');if(_pp3)_pp3.style.display='block';
+      var _hint3=document.getElementById('los-hint');
+      if(_hint3){
+        if(pnCurrentType){
+          var _icons3={gateway:'📡',sensor:'🌡',torre:'🗼'};
+          var _labels3={gateway:'Gateway',sensor:'Node Sensor',torre:'Torre'};
+          _hint3.textContent=_icons3[pnCurrentType]+' Clica al mapa per posar '+_labels3[pnCurrentType];
+        } else {
+          _hint3.textContent='📍 Obre el menú ⋮ per seleccionar tipus';
+        }
+        _hint3.style.display='block';
+      }
+    }
+    document.getElementById('hm-view-carto').style.display='none';
+    document.getElementById('hm-view-sat').style.display='none';
+    document.getElementById('hm-view-3d').style.display='block';
+    return;
+  }
+
+  if(mode==='2d'){
+    // Tornar a sat des de 3D
+    if(is3D) toggleCesium3D(btn3d);
+    document.getElementById('hm-view-carto').style.display='none';
+    document.getElementById('hm-view-sat').style.display='block';
+    document.getElementById('hm-view-3d').style.display='none';
+    _activeIds.forEach(function(id){if(id==='hm-posar')return;var el=document.getElementById(id);if(el)el.classList.add('active');});
+    _visiblePanels.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='block';});
+    return;
+  }
+
+  if(mode==='carto'){
+    if(is3D) toggleCesium3D(btn3d);
+    if(currentMap==='sat'){ map.removeLayer(satelliteLayer); cartoLayer.addTo(map); currentMap='carto'; }
+    document.getElementById('hm-view-carto').style.display='block';
+    document.getElementById('hm-view-sat').style.display='none';
+    document.getElementById('hm-view-3d').style.display='none';
+    _activeIds.forEach(function(id){if(id==='hm-posar')return;var el=document.getElementById(id);if(el)el.classList.add('active');});
+    _visiblePanels.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='block';});
+    return;
+  }
+
+  if(mode==='sat'){
+    if(currentMap==='carto'){ map.removeLayer(cartoLayer); satelliteLayer.addTo(map); currentMap='sat'; }
+    document.getElementById('hm-view-carto').style.display='none';
+    document.getElementById('hm-view-sat').style.display='block';
+    document.getElementById('hm-view-3d').style.display='none';
+    _activeIds.forEach(function(id){if(id==='hm-posar')return;var el=document.getElementById(id);if(el)el.classList.add('active');});
+    _visiblePanels.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='block';});
+    if(typeof ndviLayer!=='undefined'&&ndviLayer&&ndviVisible){if(!map.hasLayer(ndviLayer))ndviLayer.addTo(map);setTimeout(function(){ndviLayer.eachLayer(function(l){try{l.bringToFront();}catch(e){}});},300);}
+    if(typeof windLayer!=='undefined'&&windLayer&&!map.hasLayer(windLayer)) windLayer.addTo(map);
+    if(typeof firmsLayer!=='undefined'&&firmsLayer&&!map.hasLayer(firmsLayer)) firmsLayer.addTo(map);
+    return;
+  }
+}
+
+function hmEnable3DTools(on){
+  ['hm-los','hm-cov'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.disabled=!on;
+  });
+}
+
+function hmEdit(){
+  // Tancar menu primer
+  hmOpen = false;
+  document.getElementById('hmenu-panel').classList.remove('open');
+
+  // Canviar mode
+  toggleEditMode();
+
+  // Actualitzar text per la propera vegada que s'obri el menu
+  // editMode ja es el nou valor
+  var txt  = editMode ? 'Guardar Posició' : 'Moure Nodes';
+  var icon = editMode ? '✓' : '✎';
+  ['hm-edit-txt-c','hm-edit-txt-s'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.textContent=txt;
+  });
+  ['hm-edit-icon-c','hm-edit-icon-s'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.textContent=icon;
+  });
+}
+function hmClear(){
+  // Limpiar 2D
+  if(window.losMarker2DA){try{map.removeLayer(window.losMarker2DA);}catch(e){}window.losMarker2DA=null;}
+  if(window.losMarker2DB){try{map.removeLayer(window.losMarker2DB);}catch(e){}window.losMarker2DB=null;}
+  if(window.losLine2D){try{map.removeLayer(window.losLine2D);}catch(e){}window.losLine2D=null;}
+  window.losPoints2D=[];
+  if(typeof map!=='undefined'&&map)map.getContainer().style.cursor='default';
+  // Limpiar 3D
+  if(cesiumViewer){
+    losPrimitives.forEach(function(p){try{cesiumViewer.entities.remove(p);}catch(e){try{cesiumViewer.scene.primitives.remove(p);}catch(e2){}}});
+    if(losEntityA){try{cesiumViewer.entities.remove(losEntityA);}catch(e){}losEntityA=null;}
+    if(losEntityB){try{cesiumViewer.entities.remove(losEntityB);}catch(e){}losEntityB=null;}
+    if(losEntityLine){try{cesiumViewer.entities.remove(losEntityLine);}catch(e){}losEntityLine=null;}
+    cesiumViewer.canvas.style.cursor='default';
+  }
+  losPrimitives=[];losPoints=[];waitingForClick=false;
+  covMode=false;losMenuOpen=false;
+  document.getElementById("los-dots-menu").classList.remove("open");
+  var hlos=document.getElementById("hm-los");
+  var hcov=document.getElementById("hm-cov");
+  if(hcov)hcov.className="hm-btn";
+  var _rdw=document.getElementById("rf-dots-wrap");if(_rdw)_rdw.style.display="none";
+  var _lh=document.getElementById("los-hint");
+  if(losMode){
+    if(hlos)hlos.className="hm-btn act-green";
+    if(_lh){_lh.style.display="block";_lh.textContent="Obre el menú ⋮ per afegir punt";}
+  } else {
+    if(hlos)hlos.className="hm-btn";
+    if(_lh)_lh.style.display="none";
+    var _ldw=document.getElementById("los-dots-wrap");if(_ldw)_ldw.style.display="none";
+    showLeafletZoom();
+    showToolInfo(null);
+  }
+  elevClose();
+}
+
+// ── PANEL ELEVACIO / LOS AVANÇAT ─────────────────────────────
+var elevChart = null;
+var elevFreq = 869; // MHz
+var elevData = null;
+var LOS_SAMPLES = 60;
+
+function elevClose(){
+  var _rfl=document.getElementById('rf-legend');if(_rfl)_rfl.style.visibility='';
+  document.getElementById('elev-panel').style.display='none';
+  if(elevChart){ elevChart.destroy(); elevChart=null; }
+  var lh=document.getElementById('los-hint');if(lh)lh.style.display='none';
+}
+
+function elevConfig(){
+  var f = prompt('Freqüència (MHz):', elevFreq);
+  if(f && !isNaN(f)){ elevFreq = parseFloat(f); if(elevData) renderElevPanel(elevData); }
+}
+
+function elevSave(){
+  if(!elevChart) return;
+  var chartCanvas = document.getElementById('elev-chart');
+  var infoA = document.getElementById('elev-info-a').textContent;
+  var infoB = document.getElementById('elev-info-b').textContent;
+  var infoRF = document.getElementById('elev-info-rf').textContent;
+  var hintTxt = document.getElementById('los-hint').textContent;
+
+  var padding = 16;
+  var headerH = 70;
+  var exportCanvas = document.createElement('canvas');
+  exportCanvas.width = chartCanvas.width + padding*2;
+  exportCanvas.height = chartCanvas.height + headerH + padding;
+  var ctx2 = exportCanvas.getContext('2d');
+
+  // Fons
+  ctx2.fillStyle = 'rgba(4,14,22,1)';
+  ctx2.fillRect(0,0,exportCanvas.width,exportCanvas.height);
+
+  // Border
+  ctx2.strokeStyle = 'rgba(0,229,255,.3)';
+  ctx2.lineWidth = 1;
+  ctx2.strokeRect(1,1,exportCanvas.width-2,exportCanvas.height-2);
+
+  // Header text
+  ctx2.font = '600 12px monospace';
+  ctx2.fillStyle = '#00e5ff';
+  ctx2.fillText(infoA, padding, 20);
+  ctx2.fillText(infoB, padding, 36);
+  ctx2.fillStyle = '#00ff88';
+  ctx2.font = '11px monospace';
+  ctx2.fillText(infoRF, padding, 52);
+
+  // LOS status
+  ctx2.font = 'bold 11px monospace';
+  ctx2.fillStyle = hintTxt.indexOf('VISIBLE')>=0 ? '#00ff88' : '#ff1744';
+  ctx2.textAlign = 'right';
+  ctx2.fillText(hintTxt, exportCanvas.width-padding, 36);
+  ctx2.textAlign = 'left';
+
+  // Separador
+  ctx2.strokeStyle = 'rgba(0,229,255,.2)';
+  ctx2.beginPath();
+  ctx2.moveTo(padding, 60);
+  ctx2.lineTo(exportCanvas.width-padding, 60);
+  ctx2.stroke();
+
+  // Grafic centrat
+  ctx2.drawImage(chartCanvas, padding, headerH);
+
+  var a = document.createElement('a');
+  a.href = exportCanvas.toDataURL('image/png');
+  a.download = 'los_profile.png';
+  a.click();
+}
+
+// FSPL
+function calcFSPL(distM, freqMHz){
+  return 20*Math.log10(distM) + 20*Math.log10(freqMHz*1e6) - 147.55;
+}
+
+// Fresnel radius
+function fresnelR(d1, d2, freqMHz){
+  var lambda = 3e8 / (freqMHz * 1e6);
+  if(d1 <= 0 || d2 <= 0) return 0;
+  var r = Math.sqrt(lambda * d1 * d2 / (d1 + d2));
+  var dist = d1 + d2;
+  var visMin = Math.min(dist * 0.05, 35) * Math.sin(Math.PI * d1 / dist);
+  return Math.max(r, visMin);
+}
+// Genera array de Fresnel amb forma el·liptica correcta afegint punts extra als extrems
+function fresnelArray(distances, losHeights, dist, freqMHz, sign){
+  var arr = distances.map(function(d, i){
+    var d1=d, d2=dist-d;
+    if(d1<=0||d2<=0) return losHeights[i];
+    return losHeights[i] + sign * fresnelR(d1, d2, freqMHz);
+  });
+  // Inserir punts just despres del primer i just abans de l'ultim
+  // per forcar la corba a pujar/baixar des del punt
+  var step = dist / distances.length;
+  var d1s = step * 0.5;
+  var r1 = fresnelR(d1s, dist - d1s, freqMHz);
+  arr[0] = losHeights[0]; // extrem = 0
+  arr[1] = losHeights[1] + sign * r1 * 0.3; // segon punt petit per forcar curvatura
+  return arr;
+}
+
+async function runElevationProfile(posA, posB){
+  if(!cesiumViewer) return;
+  var scene = cesiumViewer.scene;
+
+  var cartA = Cesium.Cartographic.fromCartesian(posA);
+  var cartB = Cesium.Cartographic.fromCartesian(posB);
+
+  var latA = Cesium.Math.toDegrees(cartA.latitude);
+  var lngA = Cesium.Math.toDegrees(cartA.longitude);
+  var latB = Cesium.Math.toDegrees(cartB.latitude);
+  var lngB = Cesium.Math.toDegrees(cartB.longitude);
+
+  var elevA = cartA.height;
+  var elevB = cartB.height;
+  // Mostrar valor provisional fins que clampToHeight acabi
+
+  // Total distance
+  var distTotal = Cesium.Cartesian3.distance(posA, posB);
+
+  // Show panel
+  document.getElementById('elev-panel').style.display='block';
+  if(typeof closeAllNasaPanels==='function') closeAllNasaPanels();
+  var _rfl=document.getElementById('rf-legend');if(_rfl)_rfl.style.visibility='hidden';
+  var _ia3=document.getElementById('elev-info-a');
+  var _ib3=document.getElementById('elev-info-b');
+  var _irf3=document.getElementById('elev-info-rf');
+  // Collserola check immediat (sense esperar OSM) - amb geoid
+  var _geoidQ=49;
+  var _collsLatQ=41.41702,_collsLngQ=2.11436;
+  var _bhAq=Math.sqrt(Math.pow(latA-_collsLatQ,2)+Math.pow(lngA-_collsLngQ,2))<0.0003?288:0;
+  var _bhBq=Math.sqrt(Math.pow(latB-_collsLatQ,2)+Math.pow(lngB-_collsLngQ,2))<0.0003?288:0;
+  var _eAqSol=(elevA-_geoidQ), _eBqSol=(elevB-_geoidQ);
+  var _eAq=_eAqSol+_bhAq, _eBq=_eBqSol+_bhBq;
+  if(_ia3)_ia3.innerHTML='<span style="color:#5b9bd5 !important">Origen A:</span> <span id="elev-a-coords" style="color:#fff !important">'+latA.toFixed(5)+', '+lngA.toFixed(5)+'</span> <span style="color:#555 !important">|</span> <span style="color:#5b9bd5 !important">Elev:</span> <span id="elev-a-val" style="color:#fff !important">'+(_bhAq>0?_eAq.toFixed(1)+'m ('+_eAqSol.toFixed(0)+'m sol + '+_bhAq+'m estructura)':_eAqSol.toFixed(1)+'m')+'</span>';
+  if(_ib3)_ib3.innerHTML='<span style="color:#5b9bd5 !important">Destí B:</span> <span id="elev-b-coords" style="color:#fff !important">'+latB.toFixed(5)+', '+lngB.toFixed(5)+'</span> <span style="color:#555 !important">|</span> <span style="color:#5b9bd5 !important">Elev:</span> <span id="elev-b-val" style="color:#fff !important">'+(_bhBq>0?_eBq.toFixed(1)+'m ('+_eBqSol.toFixed(0)+'m sol + '+_bhBq+'m estructura)':_eBqSol.toFixed(1)+'m')+'</span>';
+  // Valors ja mostrats immediatament abans - no cal Promise OSM
+  var fspl = calcFSPL(distTotal, elevFreq);
+  if(_irf3)_irf3.innerHTML='<span style="color:#ff9800 !important">RF:</span> <span style="color:#fff !important">'+elevFreq+'MHz</span> <span style="color:#555 !important">|</span> <span style="color:#ff9800 !important">Dist:</span> <span style="color:#fff !important">'+(distTotal/1000).toFixed(2)+'km</span> <span style="color:#555 !important">|</span> <span style="color:#ff9800 !important">FSPL:</span> <span style="color:#fff !important">'+fspl.toFixed(1)+'dB</span> <span style="color:#555 !important">|</span> <span style="color:#ff9800 !important">Refrac:</span> <span style="color:#fff !important">0.25</span>';
+
+  // Hint
+    document.getElementById('los-hint').textContent = 'Calculant perfil...';
+
+  // Mostrejar punts intermedis
+  var positions = [];
+  var distances = [];
+  var heights = [];
+
+  var promises = [];
+  for(var i=0; i<=LOS_SAMPLES; i++){
+    var t = i/LOS_SAMPLES;
+    var pos = Cesium.Cartesian3.lerp(posA, posB, t, new Cesium.Cartesian3());
+    positions.push(pos);
+    distances.push(t * distTotal);
+  }
+  // Sample terreny amb sampleTerrainMostDetailed (només terreny, sense edificis)
+  try {
+    var sampledHeights = await Cesium.sampleTerrainMostDetailed(
+      cesiumViewer.terrainProvider,
+      positions.map(function(p){
+        var c = Cesium.Cartographic.fromCartesian(p);
+        return new Cesium.Cartographic(c.longitude, c.latitude);
+      })
+    );
+    heights = sampledHeights.map(function(c){ return c.height || 0; });
+  } catch(e) {
+    console.warn('sampleTerrain fallback:', e);
+    heights = positions.map(function(p){
+      return Cesium.Cartographic.fromCartesian(p).height || 0;
+    });
+  }
+
+  // LOS heights A→B - afegir estructura si és la torre de Collserola
+  var _collsLat=41.41702,_collsLng=2.11436;
+  var _bhA=0,_bhB=0;
+  var _geoid3=49;
+  if(Math.sqrt(Math.pow(latA-_collsLat,2)+Math.pow(lngA-_collsLng,2))<0.0003)_bhA=288;
+  if(Math.sqrt(Math.pow(latB-_collsLat,2)+Math.pow(lngB-_collsLng,2))<0.0003)_bhB=288;
+  elevA=elevA-_geoid3; elevB=elevB-_geoid3;
+  heights=heights.map(function(h){return h-_geoid3;});
+  var elevAlos=elevA+_bhA, elevBlos=elevB+_bhB;
+  var losHeights = distances.map(function(d){
+    return elevAlos + (elevBlos - elevAlos) * (d / distTotal);
+  });
+
+  // Detect obstructions
+  var firstObstruction = -1;
+  for(var i=0; i<heights.length; i++){
+    var d1=distances[i],d2=distTotal-distances[i],frM=(d1>0&&d2>0)?fresnelR(d1,d2,elevFreq):0;
+      if(heights[i] > losHeights[i] - frM){
+      firstObstruction = i;
+      break;
+    }
+  }
+
+  // Fresnel zones
+  var _frMid2=fresnelR(distTotal/2,distTotal/2,elevFreq);
+  var fresnelTop = distances.map(function(d, i){
+    return losHeights[i]+_frMid2*Math.sin(Math.PI*d/distTotal);
+  });
+  var fresnelBot = distances.map(function(d, i){
+    return losHeights[i]-_frMid2*Math.sin(Math.PI*d/distTotal);
+  });
+
+
+  // Save data
+  elevData = {
+    distTotal: distTotal, freq: elevFreq, fspl: fspl,
+    pointA: {lat:latA,lng:lngA,elev:elevA},
+    pointB: {lat:latB,lng:lngB,elev:elevB},
+    samples: distances.map(function(d,i){
+      return {dist:d,terrain:heights[i],los:losHeights[i]};
+    })
+  };
+
+  renderElevPanel({
+    distances: distances, heights: heights,
+    losHeights: losHeights, firstObstruction: firstObstruction,
+    fresnelTop: fresnelTop, fresnelBot: fresnelBot, eAreal: elevAlos, eBreal: elevBlos
+  });
+
+  document.getElementById('los-hint').textContent =
+    firstObstruction>=0 ? '🔴 OBSTRUÏDA — a '+(distances[firstObstruction]/1000).toFixed(2)+'km' : '🟢 VISIBLE — Visió directa OK';
+}
+
+function renderElevPanel(d){
+  if(elevChart){ elevChart.destroy(); elevChart=null; }
+  var ctx = document.getElementById('elev-chart').getContext('2d');
+
+  // LOS colors - verd fins obstrucció, vermell després
+  var losColors = d.distances.map(function(_,i){
+    return (d.firstObstruction>=0 && i>=d.firstObstruction) ? 'rgba(255,23,68,1)' : 'rgba(0,255,136,1)';
+  });
+
+  var _distRef2 = d.distTotal || d.distances[d.distances.length-1];
+  var _fr1real = fresnelR(_distRef2/2,_distRef2/2,elevFreq);
+  var _fr1vis = _fr1real;
+  // Zones 2 i 3 - radis correctes: r_n = r1 * sqrt(n)
+  var _fr2 = _fr1vis * Math.sqrt(2);
+  var _fr3 = _fr1vis * Math.sqrt(3);
+  window._fresnelDrawData = {
+    top: d.fresnelTop, bot: d.fresnelBot,
+    top2: d.distances.map(function(d2,i){return d.losHeights[i]+_fr2*Math.sin(Math.PI*d2/_distRef2);}),
+    bot2: d.distances.map(function(d2,i){return d.losHeights[i]-_fr2*Math.sin(Math.PI*d2/_distRef2);}),
+    top3: d.distances.map(function(d2,i){return d.losHeights[i]+_fr3*Math.sin(Math.PI*d2/_distRef2);}),
+    bot3: d.distances.map(function(d2,i){return d.losHeights[i]-_fr3*Math.sin(Math.PI*d2/_distRef2);})
+  };
+  elevChart = new Chart(ctx, {
+    type: 'line',
+    plugins: [window._fresnelEllipsePlugin],
+    data: {
+      labels: d.distances.map(function(v){ return (v/1000).toFixed(2); }),
+      datasets: [
+        // Terreny - exacte MeshCore amb gradient
+        {
+          label: 'Terreny',
+          data: d.heights,
+          fill: 'origin',
+          backgroundColor: (function(){
+            var el=document.getElementById('elev-chart');
+            var c=el.getContext('2d');
+            var h=el.offsetHeight||220;
+            var g=c.createLinearGradient(0,0,0,h);
+            g.addColorStop(0,'rgba(140,95,45,1)');
+            g.addColorStop(0.45,'rgba(90,62,27,.55)');
+            g.addColorStop(1,'rgba(20,10,5,.1)');
+            return g;
+          })(),
+          borderColor: '#c8a84b',
+          borderWidth: 1.5,
+          pointRadius: 0, tension: 0.3, order: 4
+        },
+        // Punt A/B estructura (forçar escala Y correcta)
+        {
+          label: 'Estructura',
+          data: d.distances.map(function(_,i){
+            if(i===0) return d.eAreal||d.losHeights[0];
+            if(i===d.distances.length-1) return d.eBreal||d.losHeights[d.losHeights.length-1];
+            return null;
+          }),
+          fill: false, borderColor: 'transparent',
+          pointRadius: 0, tension: 0, order: 0, spanGaps: false
+        },
+        // LOS
+        {
+          label: 'LOS',
+          data: d.losHeights,
+          fill: false,
+          borderColor: '#ff4444',
+          borderWidth: 2.5,
+          pointRadius: function(ctx){
+            var i=ctx.dataIndex,n=d.distances.length-1;
+            return (i===0||i===n)?6:0;
+          },
+          pointBackgroundColor: '#00e5ff',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          pointStyle: 'circle',
+          tension: 0, order: 1, clip: false
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: {duration: 400},
+      plugins: {
+        legend: {display: false},
+        tooltip: {
+          mode: 'index', intersect: false,
+          backgroundColor: 'rgba(4,14,22,.95)',
+          borderColor: 'rgba(0,229,255,.3)', borderWidth: 1,
+          titleColor: '#00e5ff', bodyColor: 'rgba(0,229,255,.7)',
+          titleFont: {family:'Share Tech Mono', size:9},
+          bodyFont: {family:'Share Tech Mono', size:8},
+          callbacks: {
+            title: function(items){ return 'Dist: '+items[0].label+'km'; },
+            label: function(item){
+              if(item.datasetIndex===0) return 'Terreny: '+item.raw.toFixed(1)+'m';
+              if(item.datasetIndex===3) return 'LOS: '+item.raw.toFixed(1)+'m';
+              return null;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: {color:'rgba(0,229,255,.06)'},
+          ticks: {color:'rgba(0,229,255,.5)',font:{family:'Share Tech Mono',size:8},
+            maxTicksLimit:8,
+            callback:function(v,i){ return d.distances[i]?(d.distances[i]/1000).toFixed(1)+'km':null; }
+          },
+          title: {display:true,text:'Distància (km)',color:'rgba(0,229,255,.4)',
+            font:{family:'Share Tech Mono',size:8}}
+        },
+        y: {
+          min: (function(){
+            var terrVals=d.heights.concat(d.fresnelBot3||[]).filter(function(v){return v!=null&&!isNaN(v);});
+            if(d.eAreal) terrVals.push(d.eAreal);
+            if(d.eBreal) terrVals.push(d.eBreal);
+            var mn=Math.min.apply(null,terrVals);
+            var mx=Math.max.apply(null,terrVals);
+            var pad=Math.max(10, Math.round((mx-mn)*0.05));
+            return Math.floor((mn-pad)/10)*10;
+          })(),
+          max: (function(){
+            var terrVals=d.heights.concat(d.losHeights).concat(d.fresnelTop3||[]).filter(function(v){return v!=null&&!isNaN(v);});
+            if(d.eAreal) terrVals.push(d.eAreal);
+            if(d.eBreal) terrVals.push(d.eBreal);
+            var mx=Math.max.apply(null,terrVals);
+            var mn=Math.min.apply(null,terrVals);
+            var pad=Math.max(20, Math.round((mx-mn)*0.15));
+            return Math.ceil((mx+pad)/10)*10;
+          })(),
+          grid: {color:'rgba(0,229,255,.06)'},
+          ticks: {color:'rgba(0,229,255,.5)',font:{family:'Share Tech Mono',size:8},
+            callback:function(v){ return v.toFixed(0)+'m'; }
+          },
+          title: {display:true,text:'Elevació (m)',color:'rgba(0,229,255,.4)',
+            font:{family:'Share Tech Mono',size:8}}
+        }
+      }
+    }
+  });
+}
+
+// ── RF COVERAGE INTEGRATION ─────────────────────────────────────
+function rfOpenPanel(){
+  var oldOv = document.getElementById('rf-overlay');
+  if(oldOv) oldOv.remove();
+  // Posar l'overlay dins map-wrap (position:relative, overflow:hidden) - immun al scroll de la pàgina
+  var mapWrap = document.querySelector('.map-wrap') || document.querySelector('.map-card');
+  if(!mapWrap) return;
+  var overlay = document.createElement('div');
+  overlay.id = 'rf-overlay';
+  overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:9998;display:flex;align-items:center;justify-content:center;pointer-events:none;';
+  mapWrap.appendChild(overlay);
+  var p = document.getElementById('rf-panel');
+  overlay.appendChild(p);
+  p.style.cssText = 'position:relative;top:auto;left:auto;transform:none;margin:0;pointer-events:all;display:flex;flex-direction:column;z-index:9999;background:#020c10;border:1px solid rgba(0,229,255,.35);padding:36px 26px 22px 26px;font-family:Share Tech Mono,monospace;color:#00e5ff;min-width:420px;max-width:460px;box-shadow:0 0 50px rgba(0,229,255,.12);max-height:calc(100% - 40px);overflow-y:auto;';
+}
+function rfClosePanel(){
+  var p = document.getElementById('rf-panel');
+  document.body.appendChild(p);
+  p.style.display = 'none';
+  var overlay = document.getElementById('rf-overlay');
+  if(overlay) overlay.remove();
+}
+function rfGetParams(){
+  return {
+    txPower:    parseFloat(document.getElementById('rf-txpower').value)||27,
+    freq:       parseFloat(document.getElementById('rf-freq').value)||868,
+    txGain:     parseFloat(document.getElementById('rf-txgain').value)||3,
+    rxGain:     parseFloat(document.getElementById('rf-rxgain').value)||2,
+    txHeight:   parseFloat(document.getElementById('rf-txh').value)||10,
+    rxHeight:   1.5,
+    rxSens:     parseFloat(document.getElementById('rf-sens').value)||-137,
+    radius:     parseFloat(document.getElementById('rf-radius').value)||3000,
+    environment:document.getElementById('rf-env').value||'urban',
+    gridStep:   80
+  };
+}
+function rfLaunch(){
+  rfClosePanel();
+  covMode=true;
+  waitingForClick=true;
+  if(cesiumViewer) cesiumViewer.canvas.style.cursor='crosshair';
+  if(typeof map!=='undefined'&&map&&!is3D){map.getContainer().style.cursor='crosshair';map.getContainer().classList.add('waiting-click');document.body.classList.add('waiting-click');}
+  var hint=document.getElementById('los-hint');
+  hint.style.display='block';
+  hint.textContent='📡 Clica per col·locar el node al mapa';
+}
+function rfClearCoverage(){
+  if(typeof RFMulti!=='undefined'){ if(cesiumViewer) RFMulti.clearAll(cesiumViewer); else if(typeof map!=='undefined'&&map) RFMulti.clearAll2D(map); }
+  else if(typeof RFCoverage!=='undefined') RFCoverage.clear(cesiumViewer);
+  covMode=false;
+  var hcov=document.getElementById('hm-cov');
+  if(hcov)hcov.classList.remove('active');
+  var hint=document.getElementById('los-hint');
+  if(hint)hint.style.display='none';
+}
+
+// Restaurar cursor si click fora del mapa sense haver posat punt
+document.addEventListener('click', function(ev){
+  if(!waitingForClick) return;
+  // Ignorar clicks als botons del menú LOS/RF
+  if(ev.target.closest('#los-dots-wrap')||ev.target.closest('#rf-dots-wrap')||ev.target.closest('#hmenu-panel')||ev.target.closest('#rf-panel')) return;
+  var mapEl = document.querySelector('.map-wrap');
+  var cesEl = document.getElementById('cesium-map');
+  if(mapEl && mapEl.contains(ev.target)) return;
+  if(cesEl && cesEl.contains(ev.target)) return;
+  waitingForClick = false;
+  document.body.classList.remove('waiting-click');document.documentElement.style.cursor='';
+  if(typeof map!=='undefined'&&map){
+    map.getContainer().style.cursor='';
+    map.getContainer().classList.remove('waiting-click');
+  }
+  if(typeof cesiumViewer!=='undefined'&&cesiumViewer&&cesiumViewer.canvas)
+    cesiumViewer.canvas.style.cursor='default';
+});
+
+function exportMapPNG(){
+  var menu = document.getElementById("rf-dots-menu");
+  if(menu) menu.classList.remove("open");
+  rfMenuOpen = false;
+
+  var center = map.getCenter();
+  var zoom = map.getZoom();
+
+  // Serialitzar nodes (sense funcions)
+  var nodes = (window.RFMulti && RFMulti.nodes ? RFMulti.nodes : []).map(function(n){
+    return {
+      id: n.id, lat: n.lat, lng: n.lng, elev: n.elev,
+      label: n.label, colorIdx: n.colorIdx, params: n.params,
+      results: n.results || []
+    };
+  });
+
+  var payload = {
+    nodes: nodes,
+    center: { lat: center.lat, lng: center.lng },
+    zoom: zoom,
+    currentMap: window.currentMap || 'carto'
+  };
+
+  fetch('/screenshot/api/screenshot', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(function(r){
+    if(!r.ok) throw new Error('Error servidor');
+    return r.blob();
+  }).then(function(blob){
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+    link.download = 'cobertura_' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'-') + '.png';
+    link.href = url;
+    link.click();
+    URL.revokeObjectURL(url);
+  }).catch(function(e){ alert('Error exportant: ' + e.message); });
+}
+
+// Auto-restaurar estat quan Puppeteer obre la pàgina amb ?capture=
+(function(){
+  if(!window.location.search.includes('capture=')) return;
+  window.addEventListener('load', function(){
+    setTimeout(function(){
+      fetch('/screenshot/api/screenshot/state').then(function(r){ return r.json(); }).then(function(state){
+        if(!state || !state.nodes || !state.nodes.length) return;
+        // Centrar mapa
+        if(state.center && map) map.setView([state.center.lat, state.center.lng], state.zoom);
+        // Restaurar capa base
+        if(state.currentMap === 'sat' && typeof satelliteLayer !== 'undefined'){
+          if(typeof cartoLayer !== 'undefined') map.removeLayer(cartoLayer);
+          satelliteLayer.addTo(map);
+          window.currentMap = 'sat';
+        }
+        // Restaurar nodes amb resultats
+        state.nodes.forEach(function(n){
+          if(!n.results || !n.results.length) return;
+          RFMulti.nodes.push(n);
+          RFMulti.renderNode2D(n, map);
+        });
+        // Mostrar leyenda
+        var leg = document.getElementById('rf-legend');
+        if(leg) leg.style.display = 'flex';
+      });
+    }, 3000);
+  });
+})();
+
+function pnDeactivate(){
+  if(!pnMode||window._pnActivating) return;
+  pnMode=false;
+  pnCurrentType=null;
+  var _hw=document.getElementById('hm-posar');
+  if(_hw){_hw.classList.remove('active');_hw.classList.remove('act-green');}
+  var _pw=document.getElementById('pn-dots-wrap');if(_pw)_pw.style.display='none';
+  var _pp=document.getElementById('pn-panel');if(_pp)_pp.style.display='none';
+  var _hint=document.getElementById('los-hint');if(_hint)_hint.style.display='none';
+  showLeafletZoom();
+  if(!is3D){map.getContainer().style.cursor='';map.getContainer().classList.remove('waiting-click');document.body.classList.remove('waiting-click');}
+  else if(cesiumViewer){cesiumViewer.canvas.style.cursor='';}
+}
+function closeAllTools(){
+  pnDeactivate();
+  document.getElementById('elev-panel').style.display='none';
+  if(window._cesiumGencatEntities){window._cesiumGencatEntities.forEach(function(e){try{cesiumViewer.entities.remove(e);}catch(ex){}});window._cesiumGencatEntities=[];}
+  if(typeof closeFirmsPanel==='function') closeFirmsPanel();
+  if(typeof closePowerPanel==='function') closePowerPanel();
+  if(typeof closeEonetPanel==='function') closeEonetPanel();
+  if(typeof closeNDVIPanel==='function') closeNDVIPanel();
+  if(typeof closeBurnedPanel==='function') closeBurnedPanel();
+  if(typeof closeAQPanel==='function') closeAQPanel();
+  if(typeof closeAemetPanel==='function') closeAemetPanel();
+  // Tancar panel coordenades
+  var cp=document.getElementById('coords-panel');if(cp)cp.remove();
+  if(window._coordMarker){try{map.removeLayer(window._coordMarker);}catch(e){}window._coordMarker=null;}
+  if(window._coordCircle){try{map.removeLayer(window._coordCircle);}catch(e){}window._coordCircle=null;}
+  if(pnMode){pnMode=false;pnCurrentType=null;var _hw=document.getElementById("hm-posar");if(_hw){_hw.classList.remove("active");_hw.classList.remove("act-green");}var _pw2=document.getElementById("pn-dots-wrap");if(_pw2)_pw2.style.display="none";var _pp=document.getElementById("pn-panel");if(_pp)_pp.style.display="none";showLeafletZoom();var _hint2=document.getElementById("los-hint");if(_hint2)_hint2.style.display="none";if(!is3D){map.getContainer().style.cursor="";map.getContainer().classList.remove("waiting-click");document.body.classList.remove("waiting-click");}else if(cesiumViewer){cesiumViewer.canvas.style.cursor="";}}
+  if(typeof windLayer!=="undefined"&&windLayer){try{map.removeLayer(windLayer);}catch(e){}windLayer=null;}
+  if(window._cesiumWindEntities){window._cesiumWindEntities.forEach(function(e){try{cesiumViewer.entities.remove(e);}catch(ex){}});window._cesiumWindEntities=[];}
+  windVisible=false;var wb=document.getElementById('hm-wind-btn');if(wb)wb.classList.remove('active');var wleg=document.getElementById('wind-legend');if(wleg)wleg.remove();
+  // Desactivar LOS i COV
+  if(typeof losMode!=='undefined'&&losMode){losMode=false;losPoints=[];var hl=document.getElementById('hm-los');if(hl)hl.classList.remove('active');var lw=document.getElementById('los-dots-wrap');if(lw)lw.style.display='none';var lh=document.getElementById('los-hint');if(lh)lh.style.display='none';showLeafletZoom();}
+  if(typeof covMode!=='undefined'&&covMode){covMode=false;var hc=document.getElementById('hm-cov');if(hc)hc.classList.remove('active');var rw=document.getElementById('rf-dots-wrap');if(rw)rw.style.display='none';showLeafletZoom();}
+  if(typeof rfClearCoverage==='function') rfClearCoverage();
+}
+
+function closeAllNasaPanels(){
+
+  document.getElementById('firms-panel').style.display='none';
+  document.getElementById('power-panel').style.display='none';
+  document.getElementById('eonet-panel').style.display='none';
+  var b1=document.getElementById('hm-firms-btn');if(b1)b1.classList.remove('active');
+  var b2=document.getElementById('hm-power-btn');if(b2)b2.classList.remove('active');
+  var b3=document.getElementById('hm-eonet-btn');if(b3)b3.classList.remove('active');
+  if(firmsLayer){map.removeLayer(firmsLayer);firmsLayer=null;firmsVisible=false;}
+}
+
+// ── FIRMS NASA Fire Layer ────────────────────────────────────
+var firmsLayer = null;
+var firmsVisible = false;
+
+var cesiumFirmsEntities=[];
+function closeFirmsPanel(){
+  document.getElementById('firms-panel').style.display='none';
+  if(firmsLayer){try{map.removeLayer(firmsLayer);}catch(e){}}
+  cesiumFirmsEntities.forEach(function(e){try{cesiumViewer.entities.remove(e);}catch(ex){}});
+  cesiumFirmsEntities=[];
+  firmsVisible=false;
+  var btn=document.getElementById('hm-firms-btn');
+  if(btn) btn.classList.remove('active');
+}
+
+function toggleFirmsLayer() {
+  if(typeof closeHMenu==="function") closeHMenu();
+  var was = firmsVisible;
+  closeAllTools();
+  if (!was) loadFirmsLayer();
+}
+
+function loadFirmsLayer() {
+  var bbox = '1.5,41.2,2.5,41.7';
+  var days = 1;
+  fetch('/firms/active?bbox=' + bbox + '&days=' + days)
+    .then(function(r) { return r.text(); })
+    .then(function(csv) {
+      if (firmsLayer) map.removeLayer(firmsLayer);
+      firmsLayer = L.layerGroup();
+      var lines = csv.trim().split('\n');
+      for (var i = 1; i < lines.length; i++) {
+        var cols = lines[i].split(',');
+        if (cols.length < 2) continue;
+        var lat = parseFloat(cols[0]);
+        var lng = parseFloat(cols[1]);
+        var conf = cols[9] || 'n';
+        var color = conf === 'h' ? '#ff1744' : conf === 'n' ? '#ff9800' : '#ffeb3b';
+        L.circleMarker([lat, lng], {
+          radius: 8, color: color, fillColor: color,
+          fillOpacity: 0.8, weight: 1
+        }).bindPopup(
+          '<b>🔥 Punt de calor NASA</b><br>' +
+          'Data: ' + cols[5] + ' ' + cols[6] + '<br>' +
+          'Confiança: ' + conf + '<br>' +
+          'FRP: ' + cols[12] + ' MW'
+        ).addTo(firmsLayer);
+      }
+      if(is3D && cesiumViewer){
+        cesiumFirmsEntities.forEach(function(e){try{cesiumViewer.entities.remove(e);}catch(ex){}});
+        cesiumFirmsEntities=[];
+        for(var j=1;j<lines.length;j++){
+          var c2=lines[j].split(',');if(c2.length<2)continue;
+          var la=parseFloat(c2[0]),ln=parseFloat(c2[1]);
+          var cf=c2[9]||'n';
+          var col=cf==='h'?Cesium.Color.fromCssColorString('#ff1744'):cf==='n'?Cesium.Color.fromCssColorString('#ff9800'):Cesium.Color.fromCssColorString('#ffeb3b');
+          var ent=cesiumViewer.entities.add({
+            position:Cesium.Cartesian3.fromDegrees(ln,la,50),
+            point:{pixelSize:20,color:col,outlineColor:Cesium.Color.WHITE,outlineWidth:2,heightReference:Cesium.HeightReference.CLAMP_TO_GROUND},
+            description:'<b>🔥 Punt de calor NASA</b><br>Confiança: '+cf+'<br>FRP: '+c2[12]+' MW'
+          });
+          cesiumFirmsEntities.push(ent);
+        }
+      } else {
+        firmsLayer.addTo(map);
+      }
+      firmsVisible = true;
+      var btn=document.getElementById('hm-firms-btn');
+      if(btn) btn.classList.add('active');
+      // Mostrar panel
+      var body=document.getElementById('firms-panel-body');
+      var panel=document.getElementById('firms-panel');
+      if(body && lines.length>1){
+        var now=new Date();var dd=String(now.getDate()).padStart(2,'0');var mm=String(now.getMonth()+1).padStart(2,'0');var yyyy=now.getFullYear();
+        var html='<div style="color:#ff1744;font-size:10px;margin-bottom:8px;letter-spacing:.08em;font-weight:bold;">'+
+          (lines.length-1)+' DETECCIONS · VIIRS SNPP · '+dd+'/'+mm+'/'+yyyy+'</div>';
+        for(var j=1;j<lines.length;j++){
+          var c=lines[j].split(',');
+          if(c.length<13) continue;
+          var conf=c[9]==='h'?'ALTA':c[9]==='n'?'NOMINAL':'BAIXA';
+          var confColor=c[9]==='h'?'#ff1744':c[9]==='n'?'#ff9800':'#ffeb3b';
+          html+='<div style="border:1px solid rgba(255,152,0,.2);border-radius:4px;padding:8px;margin-bottom:6px;background:rgba(255,100,0,.04);">'+
+            '<div style="color:'+confColor+';font-size:10px;letter-spacing:.08em;margin-bottom:4px;font-weight:bold;">⬤ CONFIANÇA '+conf+'</div>'+
+            '<div style="color:#fff;font-size:11px;letter-spacing:.03em;">📍 '+parseFloat(c[0]).toFixed(4)+', '+parseFloat(c[1]).toFixed(4)+'</div>'+
+            '<div style="color:rgba(255,255,255,.75);font-size:10px;margin-top:3px;">'+
+            '🕐 '+c[5]+' '+c[6].slice(0,2)+':'+c[6].slice(2)+'h · '+
+            '⚡ FRP: '+parseFloat(c[12]).toFixed(1)+' MW · '+
+            '🛰 '+c[7]+'</div>'+
+            '</div>';
+        }
+        body.innerHTML=html;
+      }
+      if(panel) panel.style.display='block';
+    })
+    .catch(function(e) { console.error('FIRMS error:', e); });
+}
+
+// ── NASA POWER Panel ────────────────────────────────────────
+function closePowerPanel(){
+  document.getElementById('power-panel').style.display='none';
+  var btn=document.getElementById('hm-power-btn');
+  if(btn) btn.classList.remove('active');
+}
+function togglePowerPanel(){
+  if(typeof closeHMenu==="function") closeHMenu();
+  var was=document.getElementById('power-panel').style.display==='block';
+  closeAllTools();
+  if(was){return;}
+  var panel=document.getElementById('power-panel');
+  var btn=document.getElementById('hm-power-btn');
+  if(btn) btn.classList.add('active');
+  var body=document.getElementById('power-panel-body');
+  body.innerHTML='<div style="color:rgba(0,229,255,.5);font-size:10px;">Carregant...</div>';
+  panel.style.display='block';
+  fetch('/nasa-power?lat=41.45&lng=2.18')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var p=d.properties.parameter;
+      var dates=Object.keys(p.T2M).filter(function(k){return p.T2M[k]!==-999;}).sort().reverse();
+      var html='<div style="color:rgba(0,229,255,.5);font-size:9px;margin-bottom:10px;letter-spacing:.08em;">COLLSEROLA · ÚLTIMS '+dates.length+' DIES DISPONIBLES</div>';
+      dates.forEach(function(k){
+        var dd=k.slice(6,8)+'/'+k.slice(4,6)+'/'+k.slice(0,4);
+        var rh=p.RH2M[k]!==-999?p.RH2M[k].toFixed(1)+'%':'—';
+        var ws=p.WS10M[k]!==-999?p.WS10M[k].toFixed(1)+' m/s':'—';
+        html+='<div style="border:1px solid rgba(0,229,255,.15);border-radius:4px;padding:8px;margin-bottom:6px;background:rgba(0,180,255,.03);">'+
+          '<div style="color:#00e5ff;font-size:10px;font-weight:bold;margin-bottom:5px;">📅 '+dd+'</div>'+
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">'+
+          '<div style="color:rgba(255,255,255,.8);font-size:10px;">🌡 Avg: <span style="color:#fff;font-weight:bold;">'+p.T2M[k].toFixed(1)+'°C</span></div>'+
+          '<div style="color:rgba(255,255,255,.8);font-size:10px;">🔺 Max: <span style="color:#ff6b6b;font-weight:bold;">'+p.T2M_MAX[k].toFixed(1)+'°C</span></div>'+
+          '<div style="color:rgba(255,255,255,.8);font-size:10px;">🔻 Min: <span style="color:#74b9ff;font-weight:bold;">'+p.T2M_MIN[k].toFixed(1)+'°C</span></div>'+
+          '<div style="color:rgba(255,255,255,.8);font-size:10px;">💧 Hum: <span style="color:#fff;font-weight:bold;">'+rh+'</span></div>'+
+          '<div style="color:rgba(255,255,255,.8);font-size:10px;">💨 Vent: <span style="color:#fff;font-weight:bold;">'+ws+'</span></div>'+
+          '</div></div>';
+      });
+      body.innerHTML=html;
+    })
+    .catch(function(){body.innerHTML='<div style="color:#ff4444;font-size:10px;">Error carregant dades</div>';});
+}
+
+// ── NASA EONET Panel ────────────────────────────────────────
+function closeEonetPanel(){
+  document.getElementById('eonet-panel').style.display='none';
+  var btn=document.getElementById('hm-eonet-btn');
+  if(btn) btn.classList.remove('active');
+  var gm=window._gencatMarkers||[];gm.forEach(function(m){map.removeLayer(m);});window._gencatMarkers=[];
+}
+function toggleEonetPanel(){
+  if(typeof closeHMenu==="function") closeHMenu();
+  var was=document.getElementById('eonet-panel').style.display==='block';
+  closeAllTools();
+  if(was){return;}
+  var panel=document.getElementById('eonet-panel');
+  var btn=document.getElementById('hm-eonet-btn');
+  if(btn) btn.classList.add('active');
+  var body=document.getElementById('eonet-panel-body');
+  body.innerHTML='<div style="color:rgba(255,68,68,.5);font-size:10px;">Carregant...</div>';
+  panel.style.display='block';
+  fetch('/nasa-eonet')
+    .then(function(r){return r.json();})
+    .then(function(events){
+      var html='<div style="color:#ff4444;font-size:10px;font-weight:bold;margin-bottom:10px;letter-spacing:.08em;">'+events.length+' INCENDIS · BARCELONA · ANY EN CURS</div>';
+      if(events.length===0){
+        html+='<div style="color:rgba(255,255,255,.5);font-size:10px;">Cap incendi registrat a la zona</div>';
+      }
+      var gencatMarkers=window._gencatMarkers||[];
+      gencatMarkers.forEach(function(m){try{map.removeLayer(m);}catch(e){}});
+      window._gencatMarkers=[];
+      if(window._cesiumGencatEntities){window._cesiumGencatEntities.forEach(function(e){try{cesiumViewer.entities.remove(e);}catch(ex){}});window._cesiumGencatEntities=[];}
+      events.forEach(function(ev){
+        var date=ev.data_incendi?ev.data_incendi.slice(0,10):'—';
+        var dd=date.slice(8,10)+'/'+date.slice(5,7)+'/'+date.slice(0,4);
+        var haTotal=(parseFloat(ev.haforestal)||0).toFixed(2);
+        var haArb=(parseFloat(ev.haarbrades)||0).toFixed(2);
+        html+='<div style="border:1px solid rgba(255,68,68,.2);border-radius:4px;padding:8px;margin-bottom:6px;background:rgba(255,50,0,.04);">'+
+          '<div style="color:#ff6b6b;font-size:10px;font-weight:bold;margin-bottom:4px;">🔥 '+ev.termemunic+' · '+ev.comarca+'</div>'+
+          '<div style="color:rgba(255,255,255,.75);font-size:10px;">📅 '+dd+'</div>'+
+          '<div style="color:rgba(255,255,255,.75);font-size:10px;margin-top:3px;">🌲 Forestal: <b>'+haTotal+' ha</b> · Arbrada: '+haArb+' ha</div>'+
+          '</div>';
+        // Geocodificar municipi amb Nominatim
+        (function(ev, dd, haTotal){
+          fetch('https://nominatim.openstreetmap.org/search?q='+encodeURIComponent(ev.termemunic+', Catalunya')+'&format=json&limit=1')
+            .then(function(r){return r.json();})
+            .then(function(res){
+              if(!res||!res[0]) return;
+              var lat=parseFloat(res[0].lat), lng=parseFloat(res[0].lon);
+              var ha=parseFloat(haTotal);
+              var color=ha>1?'#ff1744':ha>0.1?'#ff9800':'#ffeb3b';
+              var r=ha>1?14:ha>0.1?10:7;
+              if(is3D && cesiumViewer){
+                if(!window._cesiumGencatEntities) window._cesiumGencatEntities=[];
+                var cesCol=Cesium.Color.fromCssColorString(color);
+                var sz=ha>1?22:ha>0.1?16:11;
+                var ent=cesiumViewer.entities.add({
+                  position:Cesium.Cartesian3.fromDegrees(lng,lat,30),
+                  point:{pixelSize:sz,color:cesCol.withAlpha(0.85),outlineColor:Cesium.Color.WHITE,outlineWidth:1,heightReference:Cesium.HeightReference.CLAMP_TO_GROUND},
+                  description:'<b>🔥 '+ev.termemunic+'</b><br>'+ev.comarca+'<br>📅 '+dd+'<br>🌲 '+haTotal+' ha'
+                });
+                window._cesiumGencatEntities.push(ent);
+              } else {
+                var m=L.circleMarker([lat,lng],{
+                  radius:r,color:color,fillColor:color,fillOpacity:0.7,weight:2
+                }).bindPopup(
+                  '<b>🔥 '+ev.termemunic+'</b><br>'+
+                  ev.comarca+'<br>'+
+                  '📅 '+dd+'<br>'+
+                  '🌲 '+haTotal+' ha forestals'
+                ).addTo(map);
+                window._gencatMarkers.push(m);
+              }
+            });
+        })(ev, dd, haTotal);
+      });
+      body.innerHTML=html;
+    })
+    .catch(function(){body.innerHTML='<div style="color:#ff4444;font-size:10px;">Error carregant dades</div>';});
+}
+
+// ── NASA NDVI Layer (GIBS WMS) ───────────────────────────────
+var ndviLayer = null;
+var ndviVisible = false;
+
+function closeNDVIPanel(){
+  document.getElementById('ndvi-panel').style.display='none';
+  if(ndviLayer){try{map.removeLayer(ndviLayer);}catch(e){}ndviLayer=null;}
+  if(window._cesiumNdviLayer){try{cesiumViewer.imageryLayers.remove(window._cesiumNdviLayer,false);}catch(e){}window._cesiumNdviLayer=null;}
+  if(window._cesiumRiscLayer){try{cesiumViewer.imageryLayers.remove(window._cesiumRiscLayer,false);}catch(e){}window._cesiumRiscLayer=null;}
+  if(window._cesiumNdviPrimitives){window._cesiumNdviPrimitives.forEach(function(p){try{cesiumViewer.scene.primitives.remove(p);}catch(e){}});window._cesiumNdviPrimitives=[];}
+  ndviVisible=false;
+  var btn=document.getElementById('hm-ndvi-btn');
+  if(btn) btn.classList.remove('active');
+}
+
+function toggleNDVI(){
+  if(typeof closeHMenu==="function") closeHMenu();
+  var was=ndviVisible;
+  closeAllTools();
+  if(was){return;}
+  var d=new Date();d.setDate(d.getDate()-8);
+  var dateStr=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  if(!is3D){
+    ndviLayer=L.layerGroup([
+      L.tileLayer.wms('https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi',{
+        layers:'VIIRS_SNPP_NDVI_8Day',format:'image/png',transparent:true,
+        version:'1.3.0',time:dateStr,opacity:0.35,attribution:'NASA GIBS · VIIRS NDVI 8-Day'
+      }),
+      L.tileLayer.wms('https://pcivil.icgc.cat/ogc/geoservei?map=/opt/idec/dades/pcivil/risc_incendis.map',{
+        layers:'infocat_perill',format:'image/png',transparent:true,
+        version:'1.1.1',opacity:0.65,attribution:'Protecció Civil Catalunya · Perill Incendi'
+      })
+    ]).addTo(map);
+  }
+  ndviVisible=true;
+  var btn=document.getElementById('hm-ndvi-btn');
+  if(btn) btn.classList.add('active');
+  var panel=document.getElementById('ndvi-panel');
+  var body=document.getElementById('ndvi-panel-body');
+  body.innerHTML='<div style="color:rgba(0,255,100,.5);font-size:10px;">Calculant NDVI...</div>';
+  panel.style.display='block';
+  if(is3D && cesiumViewer){
+    body.innerHTML='<div style="color:rgba(0,255,100,.5);font-size:10px;">Carregant NDVI regional...</div>';
+    Promise.all([
+      fetch('/nasa-ndvi-regional').then(function(r){return r.json();}).catch(function(){return null;}),
+      fetch('/nasa-ndvi?lat=41.45&lng=2.18').then(function(r){return r.json();})
+    ]).then(function(results){
+      var regional=results[0], panelData=results[1];
+      if(regional&&regional.subset&&regional.subset[0]&&regional.subset[0].data){
+        var subset=regional.subset[0];
+        var nr=regional.nrows,nc=regional.ncols,cellM=regional.cellsize;
+        var halfH=nr*cellM/2/111320,halfW=nc*cellM/2/82600;
+        var west0=2.18-halfW,east0=2.18+halfW,south0=41.45-halfH,north0=41.45+halfH;
+        if(window._cesiumNdviPrimitives){window._cesiumNdviPrimitives.forEach(function(p){try{cesiumViewer.scene.primitives.remove(p);}catch(e){}});window._cesiumNdviPrimitives=[];}
+        if(window._cesiumNdviLayer){try{cesiumViewer.imageryLayers.remove(window._cesiumNdviLayer,false);}catch(e){}window._cesiumNdviLayer=null;}
+        window._cesiumNdviPrimitives=[];
+        var colMap2={
+          sec:Cesium.Color.fromCssColorString('#dc3214').withAlpha(0.65),
+          mod:Cesium.Color.fromCssColorString('#ff8c00').withAlpha(0.65),
+          acc:Cesium.Color.fromCssColorString('#ffe600').withAlpha(0.6),
+          sa:Cesium.Color.fromCssColorString('#00b432').withAlpha(0.6)
+        };
+        var cellW2=(east0-west0)/nc,cellH2=(north0-south0)/nr;
+        var buckets2={sec:[],mod:[],acc:[],sa:[]};
+        subset.data.forEach(function(v,i){
+          var vn=v/10000; if(vn<0) return;
+          var ix2=i%nc,iy2=Math.floor(i/nc);
+          var w2=west0+ix2*cellW2,e2=w2+cellW2,n2=north0-iy2*cellH2,s2=n2-cellH2;
+          var k=vn<0.2?'sec':vn<0.35?'mod':vn<0.5?'acc':'sa';
+          buckets2[k].push(new Cesium.GeometryInstance({
+            geometry:new Cesium.RectangleGeometry({rectangle:Cesium.Rectangle.fromDegrees(w2,s2,e2,n2)}),
+            attributes:{color:Cesium.ColorGeometryInstanceAttribute.fromColor(colMap2[k])}
+          }));
+        });
+        Object.keys(buckets2).forEach(function(k){
+          if(!buckets2[k].length) return;
+          var prim=new Cesium.GroundPrimitive({
+            geometryInstances:buckets2[k],
+            appearance:new Cesium.PerInstanceColorAppearance({flat:true,translucent:true}),
+            classificationType:Cesium.ClassificationType.CESIUM_3D_TILE
+          });
+          cesiumViewer.scene.primitives.add(prim);
+          window._cesiumNdviPrimitives.push(prim);
+        });
+      }
+      // Panel complet igual que 2D
+      var ndviRaw=null,date='--';
+      (panelData.subset||[]).forEach(function(s){if(s.band==='250m_16_days_NDVI'&&s.data[0]>-2000){ndviRaw=s.data[0]/10000;date=s.calendar_date;}});
+      if(ndviRaw!==null){
+        var eviRaw=null,nirRaw=null,redRaw=null,blueRaw=null,quality=null;
+        (panelData.subset||[]).forEach(function(s){
+          if(s.band==='250m_16_days_EVI') eviRaw=s.data[0]/10000;
+          if(s.band==='250m_16_days_NIR_reflectance') nirRaw=s.data[0]/10000;
+          if(s.band==='250m_16_days_red_reflectance') redRaw=s.data[0]/10000;
+          if(s.band==='250m_16_days_blue_reflectance') blueRaw=s.data[0]/10000;
+          if(s.band==='250m_16_days_pixel_reliability') quality=s.data[0];
+        });
+        var ndwi=nirRaw&&blueRaw?(blueRaw-nirRaw)/(blueRaw+nirRaw):null;
+        var riskScore=0;
+        if(ndviRaw<0.2) riskScore+=3; else if(ndviRaw<0.35) riskScore+=2; else if(ndviRaw<0.5) riskScore+=1;
+        if(eviRaw&&eviRaw<0.15) riskScore+=2; else if(eviRaw&&eviRaw<0.25) riskScore+=1;
+        if(ndwi&&ndwi>0) riskScore+=1;
+        var risk=riskScore>=4?'ALT':riskScore>=2?'MODERAT':'BAIX';
+        var riskColor=riskScore>=4?'#ff1744':riskScore>=2?'#ff9800':'#00ff88';
+        var riskIcon=riskScore>=4?'🔴':riskScore>=2?'🟠':'🟢';
+        var qualityTxt=quality===0?'Excel·lent':quality===1?'Bona':quality===2?'Marginal (núvols)':'No fiable';
+        var qualityColor=quality===0?'#00ff88':quality===1?'#ffeb3b':quality===2?'#ff9800':'#ff1744';
+        var barW=Math.min(100,Math.round(ndviRaw*100));
+        var dd=date.slice(8,10)+'/'+date.slice(5,7)+'/'+date.slice(0,4);
+        body.innerHTML=
+          '<div style="color:rgba(0,229,255,.4);font-size:9px;margin-bottom:10px;letter-spacing:.1em;border-bottom:1px solid rgba(0,229,255,.1);padding-bottom:6px;">MODIS TERRA · 250m · GATEWAY COLLSEROLA · '+dd+'</div>'+
+          '<div style="border-left:3px solid '+riskColor+';padding:8px 10px;margin-bottom:10px;background:rgba(0,0,0,.2);">'+
+          '<div style="color:'+riskColor+';font-size:12px;font-weight:bold;letter-spacing:.05em;">'+riskIcon+' RISC INCENDI: '+risk+'</div>'+
+          '<div style="background:rgba(255,255,255,.08);border-radius:2px;height:5px;margin-top:6px;">'+
+          '<div style="background:'+riskColor+';width:'+Math.round(riskScore/6*100)+'%;height:5px;border-radius:2px;"></div></div>'+
+          '<div style="color:rgba(255,255,255,.4);font-size:8px;margin-top:3px;">'+riskScore+' / 6 factors de risc detectats</div></div>'+
+          '<div style="margin-bottom:10px;"><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">'+
+          '<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;"><div style="color:rgba(255,255,255,.5);font-size:8px;letter-spacing:.08em;margin-bottom:3px;">NDVI</div><div style="color:#fff;font-size:15px;font-weight:bold;">'+ndviRaw.toFixed(3)+'</div><div style="color:rgba(255,255,255,.3);font-size:7px;">Index vegetació</div></div>'+
+          (eviRaw!==null?'<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;"><div style="color:rgba(255,255,255,.5);font-size:8px;letter-spacing:.08em;margin-bottom:3px;">EVI</div><div style="color:#fff;font-size:15px;font-weight:bold;">'+eviRaw.toFixed(3)+'</div><div style="color:rgba(255,255,255,.3);font-size:7px;">Index millorat</div></div>':'<div></div>')+
+          (nirRaw?'<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;"><div style="color:rgba(255,255,255,.5);font-size:8px;letter-spacing:.08em;margin-bottom:3px;">NIR</div><div style="color:#fff;font-size:15px;font-weight:bold;">'+nirRaw.toFixed(3)+'</div><div style="color:rgba(255,255,255,.3);font-size:7px;">Infraroig proper</div></div>':'<div></div>')+
+          (redRaw?'<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;"><div style="color:rgba(255,255,255,.5);font-size:8px;letter-spacing:.08em;margin-bottom:3px;">RED</div><div style="color:#fff;font-size:15px;font-weight:bold;">'+redRaw.toFixed(3)+'</div><div style="color:rgba(255,255,255,.3);font-size:7px;">Reflectancia roja</div></div>':'<div></div>')+
+          '</div></div>'+
+          '<div style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;color:rgba(255,255,255,.4);font-size:8px;margin-bottom:3px;"><span>Sec</span><span>Moderat</span><span>Sa</span></div>'+
+          '<div style="background:rgba(255,255,255,.08);border-radius:2px;height:6px;position:relative;">'+
+          '<div style="background:linear-gradient(90deg,#ff1744 0%,#ff9800 30%,#ffeb3b 50%,#00ff88 100%);width:100%;height:6px;border-radius:2px;opacity:.4;"></div>'+
+          '<div style="position:absolute;top:-2px;left:'+barW+'%;width:3px;height:10px;background:#fff;border-radius:2px;transform:translateX(-50%);"></div>'+
+          '</div></div>'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(255,255,255,.08);padding-top:8px;">'+
+          '<div style="color:rgba(255,255,255,.4);font-size:8px;">🛰 Qualitat: <span style="color:'+qualityColor+'">'+qualityTxt+'</span></div>'+
+          '<div style="color:rgba(255,255,255,.3);font-size:8px;">MODIS Terra</div></div>'+
+          '<div style="border-top:1px solid rgba(255,255,255,.08);margin-top:8px;padding-top:8px;">'+
+          '<div style="color:rgba(255,255,255,.5);font-size:9px;font-weight:bold;margin-bottom:5px;letter-spacing:.08em;">LLEGENDA MAPA — NDVI</div>'+
+          '<div style="display:grid;grid-template-columns:12px 1fr;gap:3px 6px;align-items:center;">'+
+          '<div style="width:12px;height:12px;background:#dc3214;border-radius:2px;opacity:.7;"></div><div style="color:rgba(255,255,255,.7);font-size:9px;">Sec · risc alt (NDVI &lt; 0.2)</div>'+
+          '<div style="width:12px;height:12px;background:#ff8c00;border-radius:2px;opacity:.7;"></div><div style="color:rgba(255,255,255,.7);font-size:9px;">Moderat (0.2 – 0.35)</div>'+
+          '<div style="width:12px;height:12px;background:#ffe600;border-radius:2px;opacity:.7;"></div><div style="color:rgba(255,255,255,.7);font-size:9px;">Acceptable (0.35 – 0.5)</div>'+
+          '<div style="width:12px;height:12px;background:#00b432;border-radius:2px;opacity:.7;"></div><div style="color:rgba(255,255,255,.7);font-size:9px;">Vegetació sana (&gt; 0.5)</div>'+
+          '</div><div style="color:rgba(255,255,255,.3);font-size:8px;margin-top:4px;">Font: NASA MODIS Terra · 250m</div></div>';
+      }
+    }).catch(function(e){body.innerHTML='<div style="color:#ff4444;font-size:10px;">Error NDVI: '+e.message+'</div>';});
+    return;
+  }
+  // Bloc 2D
+  fetch('/nasa-ndvi?lat=41.45&lng=2.18')
+    .then(function(r){console.log('[NDVI 2D] status',r.status);return r.text();})
+    .then(function(txt){console.log('[NDVI 2D] raw',txt.slice(0,50));var d=JSON.parse(txt);
+      var body=document.getElementById('ndvi-panel-body');
+      if(!body) return;
+      var ndviRaw=null,date='--';
+      (d.subset||[]).forEach(function(s){
+        if(s.band==='250m_16_days_NDVI'&&s.data[0]>-2000){ndviRaw=s.data[0]/10000;date=s.calendar_date;}
+      });
+      if(ndviRaw===null){body.innerHTML='<div style="color:#ff4444;font-size:10px;">Sense dades disponibles</div>';return;}
+      // Extreure tots els valors
+      var eviRaw=null,nirRaw=null,redRaw=null,blueRaw=null,quality=null,ndviPrev=null,datePrev='--';
+      (d.subset||[]).forEach(function(s){
+        if(s.band==='250m_16_days_EVI') eviRaw=s.data[0]/10000;
+        if(s.band==='250m_16_days_NIR_reflectance') nirRaw=s.data[0]/10000;
+        if(s.band==='250m_16_days_red_reflectance') redRaw=s.data[0]/10000;
+        if(s.band==='250m_16_days_blue_reflectance') blueRaw=s.data[0]/10000;
+        if(s.band==='250m_16_days_pixel_reliability') quality=s.data[0];
+      });
+      // Calcular estrès hídric (NDWI aproximat)
+      var ndwi=nirRaw&&blueRaw?(blueRaw-nirRaw)/(blueRaw+nirRaw):null;
+      // Risc compost: NDVI baix + EVI baix + estrès hídric = risc alt
+      var riskScore=0;
+      if(ndviRaw<0.2) riskScore+=3;
+      else if(ndviRaw<0.35) riskScore+=2;
+      else if(ndviRaw<0.5) riskScore+=1;
+      if(eviRaw&&eviRaw<0.15) riskScore+=2;
+      else if(eviRaw&&eviRaw<0.25) riskScore+=1;
+      if(ndwi&&ndwi>0) riskScore+=1;
+      var risk=riskScore>=4?'ALT':riskScore>=2?'MODERAT':'BAIX';
+      var riskColor=riskScore>=4?'#ff1744':riskScore>=2?'#ff9800':'#00ff88';
+      var riskIcon=riskScore>=4?'🔴':riskScore>=2?'🟠':'🟢';
+      var qualityTxt=quality===0?'Excel·lent':quality===1?'Bona':quality===2?'Marginal (núvols)':'No fiable';
+      var qualityColor=quality===0?'#00ff88':quality===1?'#ffeb3b':quality===2?'#ff9800':'#ff1744';
+      var barW=Math.min(100,Math.round(ndviRaw*100));
+      var dd=date.slice(8,10)+'/'+date.slice(5,7)+'/'+date.slice(0,4);
+      body.innerHTML=
+        '<div style="color:rgba(0,229,255,.4);font-size:9px;margin-bottom:10px;letter-spacing:.1em;border-bottom:1px solid rgba(0,229,255,.1);padding-bottom:6px;">MODIS TERRA · 250m · GATEWAY COLLSEROLA · '+dd+'</div>'+
+        // Alerta principal
+        '<div style="border-left:3px solid '+riskColor+';padding:8px 10px;margin-bottom:10px;background:rgba(0,0,0,.2);">'+
+        '<div style="color:'+riskColor+';font-size:12px;font-weight:bold;letter-spacing:.05em;">'+riskIcon+' RISC INCENDI: '+risk+'</div>'+
+        '<div style="background:rgba(255,255,255,.08);border-radius:2px;height:5px;margin-top:6px;">'+
+        '<div style="background:'+riskColor+';width:'+Math.round(riskScore/6*100)+'%;height:5px;border-radius:2px;"></div></div>'+
+        '<div style="color:rgba(255,255,255,.4);font-size:8px;margin-top:3px;">'+riskScore+' / 6 factors de risc detectats</div>'+
+        '</div>'+
+        // Taula de valors
+        '<div style="margin-bottom:10px;">'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">'+
+        '<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;">'+
+        '<div style="color:rgba(255,255,255,.5);font-size:8px;letter-spacing:.08em;margin-bottom:3px;">NDVI</div>'+
+        '<div style="color:#fff;font-size:15px;font-weight:bold;">'+ndviRaw.toFixed(3)+'</div>'+
+        '<div style="color:rgba(255,255,255,.3);font-size:7px;">Index vegetació</div>'+
+        '</div>'+
+        (eviRaw!==null?'<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;">'+
+        '<div style="color:rgba(255,255,255,.5);font-size:8px;letter-spacing:.08em;margin-bottom:3px;">EVI</div>'+
+        '<div style="color:#fff;font-size:15px;font-weight:bold;">'+eviRaw.toFixed(3)+'</div>'+
+        '<div style="color:rgba(255,255,255,.3);font-size:7px;">Index millorat</div>'+
+        '</div>':'<div></div>')+
+        (nirRaw?'<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;">'+
+        '<div style="color:rgba(255,255,255,.5);font-size:8px;letter-spacing:.08em;margin-bottom:3px;">NIR</div>'+
+        '<div style="color:#fff;font-size:15px;font-weight:bold;">'+nirRaw.toFixed(3)+'</div>'+
+        '<div style="color:rgba(255,255,255,.3);font-size:7px;">Infraroig proper</div>'+
+        '</div>':'<div></div>')+
+        (redRaw?'<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;">'+
+        '<div style="color:rgba(255,255,255,.5);font-size:8px;letter-spacing:.08em;margin-bottom:3px;">RED</div>'+
+        '<div style="color:#fff;font-size:15px;font-weight:bold;">'+redRaw.toFixed(3)+'</div>'+
+        '<div style="color:rgba(255,255,255,.3);font-size:7px;">Reflectancia roja</div>'+
+        '</div>':'<div></div>')+
+        '</div></div>'+
+        // Barra NDVI
+        '<div style="margin-bottom:10px;">'+
+        '<div style="display:flex;justify-content:space-between;color:rgba(255,255,255,.4);font-size:8px;margin-bottom:3px;"><span>Sec</span><span>Moderat</span><span>Sa</span></div>'+
+        '<div style="background:rgba(255,255,255,.08);border-radius:2px;height:6px;position:relative;">'+
+        '<div style="background:linear-gradient(90deg,#ff1744 0%,#ff9800 30%,#ffeb3b 50%,#00ff88 100%);width:100%;height:6px;border-radius:2px;opacity:.4;"></div>'+
+        '<div style="position:absolute;top:-2px;left:'+barW+'%;width:3px;height:10px;background:#fff;border-radius:2px;transform:translateX(-50%);"></div>'+
+        '</div></div>'+
+        // Qualitat i satellit
+        '<div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(255,255,255,.08);padding-top:8px;">'+
+        '<div style="color:rgba(255,255,255,.4);font-size:8px;">🛰 Qualitat: <span style="color:'+qualityColor+'">'+qualityTxt+'</span></div>'+
+        '<div style="color:rgba(255,255,255,.3);font-size:8px;">MODIS Terra</div>'+
+        '</div>'+
+        '<div style="border-top:1px solid rgba(255,255,255,.08);margin-top:8px;padding-top:8px;">'+
+        '<div style="color:rgba(255,255,255,.5);font-size:9px;font-weight:bold;margin-bottom:5px;letter-spacing:.08em;">LLEGENDA MAPA — PERILL INCENDI</div>'+
+        '<div style="display:grid;grid-template-columns:12px 1fr;gap:3px 6px;align-items:center;">'+
+        '<div style="width:12px;height:12px;background:#f5e6c8;border-radius:2px;border:1px solid rgba(255,255,255,.2);"></div><div style="color:rgba(255,255,255,.7);font-size:9px;">Sense perill / no forestal</div>'+
+        '<div style="width:12px;height:12px;background:#d4a853;border-radius:2px;"></div><div style="color:rgba(255,255,255,.7);font-size:9px;">Perill baix</div>'+
+        '<div style="width:12px;height:12px;background:#c47a2a;border-radius:2px;"></div><div style="color:rgba(255,255,255,.7);font-size:9px;">Perill moderat</div>'+
+        '<div style="width:12px;height:12px;background:#8b3a10;border-radius:2px;"></div><div style="color:rgba(255,255,255,.7);font-size:9px;">Perill alt</div>'+
+        '<div style="width:12px;height:12px;background:#3d0a00;border-radius:2px;"></div><div style="color:rgba(255,255,255,.7);font-size:9px;">Perill molt alt</div>'+
+        '</div>'+
+        '<div style="color:rgba(255,255,255,.3);font-size:8px;margin-top:4px;">Font: Protecció Civil Catalunya</div>'+
+        '</div>';
+    })
+    .catch(function(){body.innerHTML='<div style="color:#ff4444;font-size:10px;">Error carregant dades</div>';});
+}
+
+// ── NASA MODIS Burned Area ───────────────────────────────────
+var burnedMarkers = [];
+var burnedVisible = false;
+
+function closeBurnedPanel(){
+  document.getElementById('burned-panel').style.display='none';
+  burnedMarkers.forEach(function(m){map.removeLayer(m);});
+  burnedMarkers=[];
+  burnedVisible=false;
+  var btn=document.getElementById('hm-burned-btn');
+  if(btn) btn.classList.remove('active');
+}
+
+function toggleBurnedArea(){
+  if(typeof closeHMenu==="function") closeHMenu();
+  var was=burnedVisible;
+  closeAllTools();
+  if(was){return;}
+  var btn=document.getElementById('hm-burned-btn');
+  if(btn) btn.classList.add('active');
+  burnedVisible=true;
+  var panel=document.getElementById('burned-panel');
+  var body=document.getElementById('burned-panel-body');
+  body.innerHTML='<div style="color:rgba(255,68,68,.5);font-size:10px;">Carregant zones cremades...</div>';
+  panel.style.display='block';
+  fetch('/nasa-burned?lat=41.45&lng=2.18')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var subset=d.subset||[];
+      var xll=parseFloat(d.xllcorner),yll=parseFloat(d.yllcorner);
+      var cs=parseFloat(d.cellsize),ncols=d.ncols,nrows=d.nrows;
+      var burned=[];
+      subset.forEach(function(s){
+        if(s.band!=='Burn_Date') return;
+        s.data.forEach(function(v,idx){
+          if(v>0){
+            var col=idx%ncols, row=Math.floor(idx/ncols);
+            var x=xll+col*cs+cs/2, y=yll+(nrows-row-1)*cs+cs/2;
+            // Convertir UTM a lat/lng aproximat (zona 31N)
+            var lat=y/111320;
+            var lng=x/(111320*Math.cos(lat*Math.PI/180));
+            burned.push({lat:lat,lng:lng,day:v,date:s.calendar_date});
+          }
+        });
+      });
+      if(burned.length===0){
+        body.innerHTML='<div style="color:rgba(255,255,255,.5);font-size:10px;">Cap zona cremada detectada a Collserola i voltants durant el periode analitzat.</div>';
+        return;
+      }
+      burned.forEach(function(b){
+        var m=L.circleMarker([b.lat,b.lng],{
+          radius:10,color:'#ff1744',fillColor:'#ff4444',
+          fillOpacity:0.6,weight:2
+        }).bindPopup(
+          '<b>🔴 Zona Cremada</b><br>'+
+          'Data deteccio: '+b.date+'<br>'+
+          'Dia de l\'any: '+b.day
+        ).addTo(map);
+        burnedMarkers.push(m);
+      });
+      var year=new Date().getFullYear()-1;
+      body.innerHTML='<div style="color:#ff4444;font-size:10px;font-weight:bold;margin-bottom:10px;">'+burned.length+' ZONES CREMADES · COLLSEROLA · '+year+'</div>'+
+        burned.map(function(b){
+          return '<div style="border:1px solid rgba(255,68,68,.2);border-radius:4px;padding:8px;margin-bottom:6px;background:rgba(255,50,0,.04);">'+
+            '<div style="color:#ff6b6b;font-size:10px;font-weight:bold;">🔴 Zona cremada</div>'+
+            '<div style="color:rgba(255,255,255,.75);font-size:10px;">📅 '+b.date+'</div>'+
+            '<div style="color:rgba(255,255,255,.5);font-size:9px;">Dia any: '+b.day+'</div>'+
+            '</div>';
+        }).join('');
+    })
+    .catch(function(){body.innerHTML='<div style="color:#ff4444;font-size:10px;">Error carregant dades</div>';});
+}
+
+// ── OpenAQ Air Quality Panel ─────────────────────────────────
+function closeAQPanel(){
+  document.getElementById('aq-panel').style.display='none';
+  var btn=document.getElementById('hm-aq-btn');
+  if(btn) btn.classList.remove('active');
+}
+function toggleAQPanel(){
+  if(typeof closeHMenu==="function") closeHMenu();
+  var was=document.getElementById('aq-panel').style.display==='block';
+  closeAllTools();
+  if(was){return;}
+  var panel=document.getElementById('aq-panel');
+  var body=document.getElementById('aq-panel-body');
+  var btn=document.getElementById('hm-aq-btn');
+  if(btn) btn.classList.add('active');
+  body.innerHTML='<div style="color:rgba(0,229,255,.5);font-size:10px;">Carregant qualitat aire...</div>';
+  panel.style.display='block';
+  fetch('/open-aq?lat=41.45&lng=2.18')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var results=d.results||[];
+      // Límits OMS per qualitat aire
+      var limits={no2:40,so2:20,pm25:15,pm10:45,o3:100,co:4000};
+      var paramNames={no2:'NO₂',so2:'SO₂',pm25:'PM2.5',pm10:'PM10',o3:'O₃',co:'CO',no:'NO',nox:'NOx'};
+      var paramUnits={no2:'µg/m³',so2:'µg/m³',pm25:'µg/m³',pm10:'µg/m³',o3:'µg/m³',co:'µg/m³',no:'µg/m³',nox:'µg/m³'};
+      var html='<div style="color:rgba(0,229,255,.5);font-size:9px;margin-bottom:10px;letter-spacing:.08em;font-weight:bold;">'+results.length+' ESTACIONS · RADI 25KM</div>';
+      results.forEach(function(s){
+        var readings=s.readings||[];
+        if(!readings.length) return;
+        var maxDate=readings.reduce(function(a,b){return a.date>b.date?a:b;},{date:''}).date;
+        var dateStr=maxDate?maxDate.slice(0,16).replace('T',' ')+'h':'—';
+        html+='<div style="border:1px solid rgba(0,229,255,.15);border-radius:4px;padding:8px;margin-bottom:8px;background:rgba(0,180,255,.03);">'+
+          '<div style="color:#00e5ff;font-size:10px;font-weight:bold;margin-bottom:2px;">📍 '+s.name+'</div>'+
+          '<div style="color:rgba(255,255,255,.4);font-size:8px;margin-bottom:6px;">'+dateStr+'</div>'+
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">';
+        readings.forEach(function(r){
+          var p=r.param.toLowerCase();
+          var lim=limits[p];
+          var pct=lim?Math.min(100,Math.round(r.value/lim*100)):null;
+          var color=pct===null?'#aaa':pct>100?'#ff1744':pct>75?'#ff9800':pct>50?'#ffeb3b':'#00ff88';
+          var qualitat=pct===null?'—':pct>100?'DOLENTA':pct>75?'MODERADA':pct>50?'ACCEPTABLE':'BONA';
+          html+='<div style="background:rgba(255,255,255,.05);border-radius:4px;padding:7px;">'+
+            '<div style="color:rgba(255,255,255,.6);font-size:10px;font-weight:bold;margin-bottom:3px;">'+(paramNames[p]||r.param.toUpperCase())+'</div>'+
+            '<div style="color:#fff;font-size:13px;font-weight:bold;">'+r.value+' <span style="font-size:9px;color:rgba(255,255,255,.5);">'+(paramUnits[p]||'')+'</span></div>'+
+            '<div style="color:'+color+';font-size:9px;font-weight:bold;margin-top:2px;">'+qualitat+'</div>'+
+            '</div>';
+        });
+        html+='</div></div>';
+      });
+      html+='<div style="color:rgba(255,255,255,.3);font-size:8px;margin-top:4px;border-top:1px solid rgba(0,229,255,.1);padding-top:6px;">Limits OMS · Font: OpenAQ</div>';
+      body.innerHTML=html;
+    })
+    .catch(function(){body.innerHTML='<div style="color:#ff4444;font-size:10px;">Error carregant dades</div>';});
+}
+
+// ── AEMET Panel ──────────────────────────────────────────────
+function closeAemetPanel(){
+  document.getElementById('aemet-panel').style.display='none';
+  var btn=document.getElementById('hm-aemet-btn');
+  if(btn) btn.classList.remove('active');
+}
+function toggleAemetPanel(){
+  if(typeof closeHMenu==="function") closeHMenu();
+  var was=document.getElementById('aemet-panel').style.display==='block';
+  closeAllTools();
+  if(was){return;}
+  var panel=document.getElementById('aemet-panel');
+  var body=document.getElementById('aemet-panel-body');
+  var btn=document.getElementById('hm-aemet-btn');
+  if(btn) btn.classList.add('active');
+  body.innerHTML='<div style="color:rgba(255,200,0,.5);font-size:10px;">Carregant prediccio AEMET...</div>';
+  panel.style.display='block';
+  fetch('/aemet')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(!document.getElementById('aemet-panel')||document.getElementById('aemet-panel').style.display==='none') return;
+      if(d.error){body.innerHTML='<div style="color:#ff4444;font-size:10px;">Error: '+d.error+'</div>';return;}
+      var celTrad={'Despejado':'Despejado','Poco nuboso':'Poc ennuvolat','Nuboso':'Ennuvolat','Muy nuboso':'Molt ennuvolat','Cubierto':'Cobert','Lluvia':'Pluja','Tormenta':'Tempesta','Nieve':'Neu','Intervalos nubosos':'Intervals nuvolosos','Bruma':'Boira lleugera','Niebla':'Boira'};
+      var celIcon={'Despejado':'☀️','Poco nuboso':'🌤','Nuboso':'⛅','Muy nuboso':'☁️','Cubierto':'☁️','Lluvia':'🌧','Tormenta':'⛈','Nieve':'❄️','Intervalos nubosos':'🌥','Bruma':'🌫','Niebla':'🌫'}[d.cel]||'🌡';
+      d.cel=celTrad[d.cel]||d.cel;
+      var riscVent=parseFloat(d.viento)>30?'ALT':parseFloat(d.viento)>15?'MODERAT':'BAIX';
+      var riscVentColor=parseFloat(d.viento)>30?'#ff1744':parseFloat(d.viento)>15?'#ff9800':'#00ff88';
+      var riscHum=parseFloat(d.humitat)<30?'ALT':parseFloat(d.humitat)<50?'MODERAT':'BAIX';
+      var riscHumColor=parseFloat(d.humitat)<30?'#ff1744':parseFloat(d.humitat)<50?'#ff9800':'#00ff88';
+      var html=
+        '<div style="color:rgba(255,200,0,.6);font-size:9px;margin-bottom:10px;letter-spacing:.1em;font-weight:bold;">AEMET · '+d.municipi.toUpperCase()+' · '+d.hora+'</div>'+
+        '<div style="border-left:3px solid #ffc800;padding:8px 10px;margin-bottom:10px;background:rgba(0,0,0,.2);">'+
+        '<div style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:.02em;">'+celIcon+' '+d.temperatura+'</div>'+
+        '<div style="color:rgba(255,255,255,.7);font-size:11px;margin-top:4px;letter-spacing:.05em;">'+d.cel+'</div>'+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">'+
+        '<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;">'+
+        '<div style="color:rgba(255,255,255,.5);font-size:9px;letter-spacing:.08em;margin-bottom:3px;">💨 VENT</div>'+
+        '<div style="color:#fff;font-size:13px;font-weight:bold;">'+d.viento+'</div>'+
+        '<div style="color:'+riscVentColor+';font-size:8px;">Risc: '+riscVent+'</div>'+
+        '</div>'+
+        '<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;">'+
+        '<div style="color:rgba(255,255,255,.5);font-size:9px;letter-spacing:.08em;margin-bottom:3px;">💧 HUMITAT</div>'+
+        '<div style="color:#fff;font-size:13px;font-weight:bold;">'+d.humitat+'</div>'+
+        '<div style="color:'+riscHumColor+';font-size:8px;">Risc: '+riscHum+'</div>'+
+        '</div>'+
+        '<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;">'+
+        '<div style="color:rgba(255,255,255,.5);font-size:9px;letter-spacing:.08em;margin-bottom:3px;">🌧 PRECIPITACIO</div>'+
+        '<div style="color:#fff;font-size:13px;font-weight:bold;">'+d.precipitacion+'</div>'+
+        '</div>'+
+        '<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;">'+
+        '<div style="color:rgba(255,255,255,.5);font-size:9px;letter-spacing:.08em;margin-bottom:3px;">📅 DATA</div>'+
+        '<div style="color:#fff;font-size:11px;font-weight:bold;">'+d.data.slice(0,10)+'</div>'+
+        '</div>'+
+        '</div>'+
+        '<div style="border-top:1px solid rgba(255,200,0,.2);padding-top:8px;margin-top:4px;">'+
+        '<div style="color:rgba(255,200,0,.8);font-size:9px;font-weight:bold;margin-bottom:3px;">⚠ Condicions de risc incendi:</div>'+
+        '<div style="color:rgba(255,255,255,.6);font-size:9px;line-height:1.6;">Humitat &lt;30% + Vent &gt;30km/h</div>'+
+        '<div style="color:rgba(255,255,255,.35);font-size:8px;margin-top:4px;">Font: AEMET OpenData · Actualitzat cada hora</div>'+
+        '</div>';
+      body.innerHTML=html;
+    })
+    .catch(function(){body.innerHTML='<div style="color:#ff4444;font-size:10px;">Error carregant dades</div>';});
+}
+
+// ── OpenAQ Air Quality Panel ─────────────────────────────────
+function closeAQPanel(){
+  document.getElementById('aq-panel').style.display='none';
+  var btn=document.getElementById('hm-aq-btn');
+  if(btn) btn.classList.remove('active');
+}
+function toggleAQPanel(){
+  if(typeof closeHMenu==="function") closeHMenu();
+  var was=document.getElementById('aq-panel').style.display==='block';
+  closeAllTools();
+  if(was){return;}
+  var panel=document.getElementById('aq-panel');
+  var body=document.getElementById('aq-panel-body');
+  var btn=document.getElementById('hm-aq-btn');
+  if(btn) btn.classList.add('active');
+  body.innerHTML='<div style="color:rgba(0,229,255,.5);font-size:10px;">Carregant qualitat aire...</div>';
+  panel.style.display='block';
+  fetch('/open-aq?lat=41.45&lng=2.18')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var results=d.results||[];
+      // Límits OMS per qualitat aire
+      var limits={no2:40,so2:20,pm25:15,pm10:45,o3:100,co:4000};
+      var paramNames={no2:'NO₂',so2:'SO₂',pm25:'PM2.5',pm10:'PM10',o3:'O₃',co:'CO',no:'NO',nox:'NOx'};
+      var paramUnits={no2:'µg/m³',so2:'µg/m³',pm25:'µg/m³',pm10:'µg/m³',o3:'µg/m³',co:'µg/m³',no:'µg/m³',nox:'µg/m³'};
+      var html='<div style="color:rgba(0,229,255,.5);font-size:9px;margin-bottom:10px;letter-spacing:.08em;font-weight:bold;">'+results.length+' ESTACIONS · RADI 25KM</div>';
+      results.forEach(function(s){
+        var readings=s.readings||[];
+        if(!readings.length) return;
+        var maxDate=readings.reduce(function(a,b){return a.date>b.date?a:b;},{date:''}).date;
+        var dateStr=maxDate?maxDate.slice(0,16).replace('T',' ')+'h':'—';
+        html+='<div style="border:1px solid rgba(0,229,255,.15);border-radius:4px;padding:8px;margin-bottom:8px;background:rgba(0,180,255,.03);">'+
+          '<div style="color:#00e5ff;font-size:10px;font-weight:bold;margin-bottom:2px;">📍 '+s.name+'</div>'+
+          '<div style="color:rgba(255,255,255,.4);font-size:8px;margin-bottom:6px;">'+dateStr+'</div>'+
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">';
+        readings.forEach(function(r){
+          var p=r.param.toLowerCase();
+          var lim=limits[p];
+          var pct=lim?Math.min(100,Math.round(r.value/lim*100)):null;
+          var color=pct===null?'#aaa':pct>100?'#ff1744':pct>75?'#ff9800':pct>50?'#ffeb3b':'#00ff88';
+          var qualitat=pct===null?'—':pct>100?'DOLENTA':pct>75?'MODERADA':pct>50?'ACCEPTABLE':'BONA';
+          html+='<div style="background:rgba(255,255,255,.05);border-radius:4px;padding:7px;">'+
+            '<div style="color:rgba(255,255,255,.6);font-size:10px;font-weight:bold;margin-bottom:3px;">'+(paramNames[p]||r.param.toUpperCase())+'</div>'+
+            '<div style="color:#fff;font-size:13px;font-weight:bold;">'+r.value+' <span style="font-size:9px;color:rgba(255,255,255,.5);">'+(paramUnits[p]||'')+'</span></div>'+
+            '<div style="color:'+color+';font-size:9px;font-weight:bold;margin-top:2px;">'+qualitat+'</div>'+
+            '</div>';
+        });
+        html+='</div></div>';
+      });
+      html+='<div style="color:rgba(255,255,255,.3);font-size:8px;margin-top:4px;border-top:1px solid rgba(0,229,255,.1);padding-top:6px;">Limits OMS · Font: OpenAQ</div>';
+      body.innerHTML=html;
+    })
+    .catch(function(){body.innerHTML='<div style="color:#ff4444;font-size:10px;">Error carregant dades</div>';});
+}
+
+// ── AEMET Panel ──────────────────────────────────────────────
+function closeAemetPanel(){
+  document.getElementById('aemet-panel').style.display='none';
+  var btn=document.getElementById('hm-aemet-btn');
+  if(btn) btn.classList.remove('active');
+}
+function toggleAemetPanel(){
+  if(typeof closeHMenu==="function") closeHMenu();
+  var was=document.getElementById('aemet-panel').style.display==='block';
+  closeAllTools();
+  if(was){return;}
+  var panel=document.getElementById('aemet-panel');
+  var body=document.getElementById('aemet-panel-body');
+  var btn=document.getElementById('hm-aemet-btn');
+  if(btn) btn.classList.add('active');
+  body.innerHTML='<div style="color:rgba(255,200,0,.5);font-size:10px;">Carregant prediccio AEMET...</div>';
+  panel.style.display='block';
+  fetch('/aemet')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(!document.getElementById('aemet-panel')||document.getElementById('aemet-panel').style.display==='none') return;
+      if(d.error){body.innerHTML='<div style="color:#ff4444;font-size:10px;">Error: '+d.error+'</div>';return;}
+      var celTrad={'Despejado':'Despejado','Poco nuboso':'Poc ennuvolat','Nuboso':'Ennuvolat','Muy nuboso':'Molt ennuvolat','Cubierto':'Cobert','Lluvia':'Pluja','Tormenta':'Tempesta','Nieve':'Neu','Intervalos nubosos':'Intervals nuvolosos','Bruma':'Boira lleugera','Niebla':'Boira'};
+      var celIcon={'Despejado':'☀️','Poco nuboso':'🌤','Nuboso':'⛅','Muy nuboso':'☁️','Cubierto':'☁️','Lluvia':'🌧','Tormenta':'⛈','Nieve':'❄️','Intervalos nubosos':'🌥','Bruma':'🌫','Niebla':'🌫'}[d.cel]||'🌡';
+      d.cel=celTrad[d.cel]||d.cel;
+      var riscVent=parseFloat(d.viento)>30?'ALT':parseFloat(d.viento)>15?'MODERAT':'BAIX';
+      var riscVentColor=parseFloat(d.viento)>30?'#ff1744':parseFloat(d.viento)>15?'#ff9800':'#00ff88';
+      var riscHum=parseFloat(d.humitat)<30?'ALT':parseFloat(d.humitat)<50?'MODERAT':'BAIX';
+      var riscHumColor=parseFloat(d.humitat)<30?'#ff1744':parseFloat(d.humitat)<50?'#ff9800':'#00ff88';
+      var html=
+        '<div style="color:rgba(255,200,0,.6);font-size:9px;margin-bottom:10px;letter-spacing:.1em;font-weight:bold;">AEMET · '+d.municipi.toUpperCase()+' · '+d.hora+'</div>'+
+        '<div style="border-left:3px solid #ffc800;padding:8px 10px;margin-bottom:10px;background:rgba(0,0,0,.2);">'+
+        '<div style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:.02em;">'+celIcon+' '+d.temperatura+'</div>'+
+        '<div style="color:rgba(255,255,255,.7);font-size:11px;margin-top:4px;letter-spacing:.05em;">'+d.cel+'</div>'+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">'+
+        '<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;">'+
+        '<div style="color:rgba(255,255,255,.5);font-size:9px;letter-spacing:.08em;margin-bottom:3px;">💨 VENT</div>'+
+        '<div style="color:#fff;font-size:13px;font-weight:bold;">'+d.viento+'</div>'+
+        '<div style="color:'+riscVentColor+';font-size:8px;">Risc: '+riscVent+'</div>'+
+        '</div>'+
+        '<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;">'+
+        '<div style="color:rgba(255,255,255,.5);font-size:9px;letter-spacing:.08em;margin-bottom:3px;">💧 HUMITAT</div>'+
+        '<div style="color:#fff;font-size:13px;font-weight:bold;">'+d.humitat+'</div>'+
+        '<div style="color:'+riscHumColor+';font-size:8px;">Risc: '+riscHum+'</div>'+
+        '</div>'+
+        '<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;">'+
+        '<div style="color:rgba(255,255,255,.5);font-size:9px;letter-spacing:.08em;margin-bottom:3px;">🌧 PRECIPITACIO</div>'+
+        '<div style="color:#fff;font-size:13px;font-weight:bold;">'+d.precipitacion+'</div>'+
+        '</div>'+
+        '<div style="background:rgba(255,255,255,.04);border-radius:4px;padding:8px;">'+
+        '<div style="color:rgba(255,255,255,.5);font-size:9px;letter-spacing:.08em;margin-bottom:3px;">📅 DATA</div>'+
+        '<div style="color:#fff;font-size:11px;font-weight:bold;">'+d.data.slice(0,10)+'</div>'+
+        '</div>'+
+        '</div>'+
+        '<div style="border-top:1px solid rgba(255,200,0,.2);padding-top:8px;margin-top:4px;">'+
+        '<div style="color:rgba(255,200,0,.8);font-size:9px;font-weight:bold;margin-bottom:3px;">⚠ Condicions de risc incendi:</div>'+
+        '<div style="color:rgba(255,255,255,.6);font-size:9px;line-height:1.6;">Humitat &lt;30% + Vent &gt;30km/h</div>'+
+        '<div style="color:rgba(255,255,255,.35);font-size:8px;margin-top:4px;">Font: AEMET OpenData · Actualitzat cada hora</div>'+
+        '</div>';
+      body.innerHTML=html;
+    })
+    .catch(function(){body.innerHTML='<div style="color:#ff4444;font-size:10px;">Error carregant dades</div>';});
+}
+
+// ── Wind Velocity Layer ──────────────────────────────────────
+var windLayer = null;
+var windVisible = false;
+
+function toggleWindLayer(){
+  if(typeof closeHMenu==="function") closeHMenu();
+  var wasWind=windVisible;
+  if(typeof pnDeactivate==='function') pnDeactivate();
+  closeAllTools();
+  if(wasWind){
+    if(windLayer){map.removeLayer(windLayer);windLayer=null;}
+    windVisible=false;
+    var btn=document.getElementById('hm-wind-btn');
+    if(btn) btn.classList.remove('active');
+    var wleg=document.getElementById('wind-legend');if(wleg)wleg.remove();
+    return;
+  }
+  var btn=document.getElementById('hm-wind-btn');
+  if(btn) btn.classList.add('active');
+  windVisible=true;
+  fetch('/wind-grid')
+    .then(function(r){return r.json();})
+    .then(function(data){
+      if(windLayer){map.removeLayer(windLayer);windLayer=null;}
+      // Llegenda vent
+      var wleg=document.createElement('div');
+      wleg.id='wind-legend';
+      wleg.style.cssText='position:absolute;bottom:20px;left:12px;z-index:2001;background:rgba(2,8,14,.92);border:1px solid rgba(0,229,255,.3);border-radius:6px;padding:10px 14px;font-family:Share Tech Mono,monospace;font-size:9px;color:rgba(255,255,255,.7);pointer-events:none;';
+      wleg.innerHTML='<div style="color:#00e5ff;font-size:10px;font-weight:bold;margin-bottom:6px;letter-spacing:.08em;">🌬 VENT EN VIU</div>'+
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;"><div style="width:24px;height:3px;background:#00e5ff;"></div> Calma (&lt;5 km/h)</div>'+
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;"><div style="width:24px;height:3px;background:#0088ff;"></div> Moderat (5-15 km/h)</div>'+
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;"><div style="width:24px;height:3px;background:#ff4444;"></div> Fort (&gt;15 km/h)</div>'+
+        '<div style="display:flex;align-items:center;gap:6px;"><div style="width:24px;height:3px;background:#ffffff;"></div> Extrem (&gt;30 km/h)</div>';
+      var _mc=is3D?document.getElementById('cesium-map'):document.getElementById('map');
+      if(_mc)_mc.appendChild(wleg);else document.body.appendChild(wleg);
+      if(is3D && cesiumViewer){
+        if(window._cesiumWindEntities){window._cesiumWindEntities.forEach(function(e){try{cesiumViewer.entities.remove(e);}catch(ex){}});}
+        if(window._cesiumWindInterval){clearInterval(window._cesiumWindInterval);window._cesiumWindInterval=null;}
+        window._cesiumWindEntities=[];
+        var uArr=data[0].data,vArr=data[1].data;
+        var header=data[0].header;
+        var nx=header.nx,ny=header.ny,lo1=header.lo1,la1=header.la1,dx=header.dx,dy=header.dy;
+        // Crear fletxes animades (polylines que es mouen)
+        var particles=[];
+        var nPart=1500;
+        for(var p=0;p<nPart;p++){
+          var rix=Math.floor(Math.random()*nx);
+          var riy=Math.floor(Math.random()*ny);
+          particles.push({
+            lng:lo1+rix*dx, lat:la1-riy*dy,
+            age:Math.floor(Math.random()*80),
+            maxAge:60+Math.floor(Math.random()*40)
+          });
+        }
+        // Crear entitats polyline per cada partícula
+        particles.forEach(function(p){
+          var cix=Math.min(nx-1,Math.max(0,Math.round((p.lng-lo1)/dx)));
+          var ciy=Math.min(ny-1,Math.max(0,Math.round((la1-p.lat)/dy)));
+          var u=uArr[ciy*nx+cix]||0,v=vArr[ciy*nx+cix]||0;
+          var spd=Math.sqrt(u*u+v*v)*3.6;
+          var col2=spd>30?'#ffffff':spd>15?'#ff4444':spd>5?'#0088ff':'#00e5ff';
+          var ang=Math.atan2(u,v);
+          var len=0.03*Math.max(0.5,Math.min(spd/8,2));
+          var eLng=p.lng+len*Math.sin(ang), eLat=p.lat+len*Math.cos(ang);
+          p.entity=cesiumViewer.entities.add({
+            polyline:{
+              positions:new Cesium.CallbackProperty(function(pp){
+                return function(){
+                  var cx=Math.min(nx-1,Math.max(0,Math.round((pp.lng-lo1)/dx)));
+                  var cy=Math.min(ny-1,Math.max(0,Math.round((la1-pp.lat)/dy)));
+                  var uu=uArr[cy*nx+cx]||0,vv=vArr[cy*nx+cx]||0;
+                  var aa=Math.atan2(uu,vv);
+                  var ss=Math.sqrt(uu*uu+vv*vv)*3.6;
+                  var ll=0.015*Math.max(0.5,Math.min(ss/8,2));
+                  var opacity=Math.min(1,pp.age/10)*Math.max(0,1-(pp.age/pp.maxAge));
+                  return Cesium.Cartesian3.fromDegreesArray([pp.lng,pp.lat,pp.lng+ll*Math.sin(aa),pp.lat+ll*Math.cos(aa)]);
+                };
+              }(p),false),
+              width:2,
+              material:Cesium.Color.fromCssColorString(col2).withAlpha(0.8),
+              clampToGround:true
+            }
+          });
+          window._cesiumWindEntities.push(p.entity);
+        });
+        // Animació
+        window._cesiumWindInterval=setInterval(function(){
+          if(!windVisible){clearInterval(window._cesiumWindInterval);return;}
+          particles.forEach(function(p){
+            p.age+=1;
+            if(p.age>p.maxAge){
+              p.lng=lo1+Math.random()*nx*dx;
+              p.lat=(la1-ny*dy)+Math.random()*ny*dy;
+              p.age=0;
+              p.maxAge=60+Math.floor(Math.random()*40);
+            }
+            var cix=Math.min(nx-1,Math.max(0,Math.round((p.lng-lo1)/dx)));
+            var ciy=Math.min(ny-1,Math.max(0,Math.round((la1-p.lat)/dy)));
+            var u=uArr[ciy*nx+cix]||0,v=vArr[ciy*nx+cix]||0;
+            var spd=Math.sqrt(u*u+v*v)*3.6;
+            var speed=0.001*Math.max(0.5,spd/5);
+            p.lng+=u*speed*0.015;
+            p.lat+=v*speed*0.015;
+            // Color dinàmic
+            var col2=spd>30?'#ffffff':spd>15?'#ff4444':spd>5?'#0088ff':'#00e5ff';
+            var opacity=Math.min(1,p.age/10)*(1-p.age/p.maxAge);
+            if(p.entity&&p.entity.polyline){
+              p.entity.polyline.material=Cesium.Color.fromCssColorString(col2).withAlpha(Math.max(0.1,opacity));
+            }
+          });
+        },30);
+      } else {
+        windLayer=L.velocityLayer({
+          displayValues:true,
+          displayOptions:{velocityType:'Wind',position:'bottomleft',emptyString:'Sense dades',angleConvention:'bearingCW',speedUnit:'km/h'},
+          data:data,maxVelocity:15,
+          colorScale:['#00e5ff','#0088ff','#ff4444','#ffffff'],
+          lineWidth:2,particleAge:64,particleMultiplier:0.005
+        });
+        windLayer.addTo(map);
+      }
+    })
+    .catch(function(e){console.error('Wind error:',e);});
+}
+
+// ── Coordenades Panel ────────────────────────────────────────
+function openCoordsPanel(keepPNMode){
+  closeHMenu();
+  if(!keepPNMode) closeAllTools();
+  var existing=document.getElementById('coords-panel');
+  if(existing){existing.remove();return;}
+  var panel=document.createElement('div');
+  panel.id='coords-panel';
+  panel.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:3000;background:rgba(2,8,14,.97);border:1px solid rgba(0,229,255,.4);border-radius:8px;padding:20px 24px;font-family:Share Tech Mono,monospace;color:#00e5ff;width:280px;box-shadow:0 0 40px rgba(0,229,255,.2);';
+  var title=document.createElement('div');
+  title.style.cssText='font-size:12px;font-weight:bold;letter-spacing:.1em;margin-bottom:14px;border-bottom:1px solid rgba(0,229,255,.2);padding-bottom:8px;';
+  title.textContent='COORDENADES';
+  panel.appendChild(title);
+  var labLat=document.createElement('div');
+  labLat.style.cssText='color:rgba(255,255,255,.5);font-size:9px;letter-spacing:.08em;margin-bottom:4px;';
+  labLat.textContent='LATITUD';
+  panel.appendChild(labLat);
+  var inLat=document.createElement('input');
+  inLat.id='coord-lat';inLat.type='text';inLat.placeholder='ex: 41.4534';
+  inLat.style.cssText='width:100%;background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.3);color:#fff;padding:8px;font-family:Share Tech Mono,monospace;font-size:12px;border-radius:4px;box-sizing:border-box;margin-bottom:10px;display:block;';
+  panel.appendChild(inLat);
+  var labLng=document.createElement('div');
+  labLng.style.cssText='color:rgba(255,255,255,.5);font-size:9px;letter-spacing:.08em;margin-bottom:4px;';
+  labLng.textContent='LONGITUD';
+  panel.appendChild(labLng);
+  var inLng=document.createElement('input');
+  inLng.id='coord-lng';inLng.type='text';inLng.placeholder='ex: 2.1814';
+  inLng.style.cssText='width:100%;background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.3);color:#fff;padding:8px;font-family:Share Tech Mono,monospace;font-size:12px;border-radius:4px;box-sizing:border-box;margin-bottom:16px;display:block;';
+  panel.appendChild(inLng);
+  var btnRow=document.createElement('div');
+  btnRow.style.cssText='display:flex;gap:8px;';
+  var btnGo=document.createElement('button');
+  btnGo.textContent='ANAR';
+  btnGo.style.cssText='flex:1;background:rgba(0,229,255,.15);border:1px solid rgba(0,229,255,.4);color:#00e5ff;padding:10px;font-family:Share Tech Mono,monospace;font-size:11px;cursor:pointer;border-radius:4px;letter-spacing:.06em;';
+  btnGo.onclick=goToCoords;
+  btnRow.appendChild(btnGo);
+  var btnClose=document.createElement('button');
+  btnClose.textContent='✕';
+  btnClose.style.cssText='background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.5);padding:10px;font-family:Share Tech Mono,monospace;font-size:11px;cursor:pointer;border-radius:4px;';
+  btnClose.onclick=function(){panel.remove();};
+  btnRow.appendChild(btnClose);
+  panel.appendChild(btnRow);
+  document.getElementById('map').appendChild(panel);
+  inLat.focus();
+}
+
+function goToCoords(){
+  var lat=parseFloat(document.getElementById('coord-lat').value.replace(',','.'));
+  var lng=parseFloat(document.getElementById('coord-lng').value.replace(',','.'));
+  if(isNaN(lat)||isNaN(lng)){
+    alert('Coordenades no vàlides');return;
+  }
+  map.setView([lat,lng],16);
+  // Marcador temporal amb cercle
+  if(window._coordMarker){map.removeLayer(window._coordMarker);map.removeLayer(window._coordCircle);}
+  window._coordMarker=L.circleMarker([lat,lng],{
+    radius:8,color:'#00e5ff',fillColor:'#00e5ff',fillOpacity:0.9,weight:2
+  }).addTo(map).bindPopup('<b>🎯 '+lat.toFixed(5)+', '+lng.toFixed(5)+'</b>').openPopup();
+  window._coordCircle=L.circle([lat,lng],{
+    radius:100,color:'#00e5ff',fillColor:'#00e5ff',fillOpacity:0.08,weight:1,dashArray:'5,5'
+  }).addTo(map);
+  document.getElementById('coords-panel').remove();
+  // Si venim de Posar Nodes, restaurar hint
+  if(window._pnCoordsMode&&pnMode){
+    window._pnCoordsMode=false;
+    var hint=document.getElementById('los-hint');
+    if(hint){hint.textContent='📍 Obre el menú ⋮ per seleccionar tipus';hint.style.display='block';}
+  } else {
+    window._pnCoordsMode=false;
+  }
+}
+
+// ── POSAR NODES ─────────────────────────────────────────────
+var pnMode=false;
+var pnCurrentType=null;
+var pnMenuOpen=false;
+var pnItems=[];
+var pnItems3D=[];
+var pnMarkers=[];
+
+function togglePNMenu(){
+  pnMenuOpen=!pnMenuOpen;
+  document.getElementById('pn-dots-menu').classList.toggle('open',pnMenuOpen);
+}
+
+function hmPosar(){
+  if(typeof closeHMenu==='function') closeHMenu();
+  var wasPN=pnMode;
+  window._pnActivating=true;
+  // Tancar altres eines sense bucle
+  if(losMode){losMode=false;losPoints=[];var _hl=document.getElementById('hm-los');if(_hl)_hl.classList.remove('active');var _lw=document.getElementById('los-dots-wrap');if(_lw)_lw.style.display='none';showLeafletZoom();}
+  if(covMode){covMode=false;var _hc=document.getElementById('hm-cov');if(_hc)_hc.classList.remove('active');var _rw=document.getElementById('rf-dots-wrap');if(_rw)_rw.style.display='none';showLeafletZoom();}
+  if(windVisible){
+    windVisible=false;
+    if(window._cesiumWindInterval){clearInterval(window._cesiumWindInterval);window._cesiumWindInterval=null;}
+    if(window._cesiumWindEntities){window._cesiumWindEntities.forEach(function(e){try{cesiumViewer.entities.remove(e);}catch(ex){}});window._cesiumWindEntities=[];}
+    if(typeof windLayer!=='undefined'&&windLayer){try{map.removeLayer(windLayer);}catch(e){}windLayer=null;}
+    var wb=document.getElementById('hm-wind-btn');if(wb)wb.classList.remove('active');
+    var wleg=document.getElementById('wind-legend');if(wleg)wleg.remove();
+  }
+  if(ndviVisible){if(typeof closeNDVIPanel==='function')closeNDVIPanel();}
+  if(typeof closePowerPanel==='function')closePowerPanel();
+  if(typeof closeAQPanel==='function')closeAQPanel();
+  if(typeof closeAemetPanel==='function')closeAemetPanel();
+  if(typeof closeEonetPanel==='function')closeEonetPanel();
+  if(typeof closeFirmsPanel==='function')closeFirmsPanel();
+  if(typeof closeBurnedPanel==='function')closeBurnedPanel();
+  // Treure fons verd de totes les eines
+  ['hm-firms-btn','hm-ndvi-btn','hm-eonet-btn','hm-aq-btn','hm-aemet-btn','hm-meteo-btn','hm-wind-btn','hm-power-btn','hm-burned-btn'].forEach(function(id){var el=document.getElementById(id);if(el)el.classList.remove('active');});
+  window._pnActivating=false;
+  if(wasPN){
+    // Desactivar
+    pnMode=false;
+    pnCurrentType=null;
+    var hw=document.getElementById('hm-posar');if(hw){hw.classList.remove('active');hw.classList.remove('act-green');}
+    var pw=document.getElementById('pn-dots-wrap');if(pw)pw.style.display='none';
+    var pp=document.getElementById('pn-panel');if(pp)pp.style.display='none';
+    pnMenuOpen=false;var _pm=document.getElementById('pn-dots-menu');if(_pm)_pm.classList.remove('open');
+    showLeafletZoom();
+    var hint=document.getElementById('los-hint');if(hint)hint.style.display='none';
+    if(!is3D){map.getContainer().style.cursor='';map.getContainer().classList.remove('waiting-click');document.body.classList.remove('waiting-click');}
+    if(cesiumViewer)cesiumViewer.canvas.style.cursor='';
+    return;
+  }
+  // Activar
+  pnMode=true;
+  var hw=document.getElementById('hm-posar');if(hw){hw.classList.add('active');hw.classList.add('act-green');}
+  var pw=document.getElementById('pn-dots-wrap');if(pw)pw.style.display='block';
+  var pp=document.getElementById('pn-panel');
+  if(pp){pp.style.display='block';pnRenderPanel();}
+  hideLeafletZoom();
+  var hint=document.getElementById('los-hint');
+  if(hint){hint.textContent='📍 Obre el menú ⋮ per seleccionar tipus';hint.style.display='block';}
+  // Amagar los-dots-wrap i rf-dots-wrap
+  var _lw=document.getElementById('los-dots-wrap');if(_lw&&!losMode)_lw.style.display='none';
+  var _rw=document.getElementById('rf-dots-wrap');if(_rw&&!covMode)_rw.style.display='none';
+  pnRenderPanel();
+}
+
+function pnSetMode(type){
+  pnCurrentType=type;
+  pnMenuOpen=false;
+  document.getElementById('pn-dots-menu').classList.remove('open');
+  var labels={gateway:'Gateway',sensor:'Node Sensor',torre:'Torre'};
+  var icons={gateway:'📡',sensor:'🌡',torre:'🗼'};
+  var hint=document.getElementById('los-hint');
+  if(hint){hint.textContent=icons[type]+' Clica al mapa per posar '+labels[type];hint.style.display='block';}
+  if(!is3D){
+    map.getContainer().style.cursor='crosshair';
+    map.getContainer().classList.add('waiting-click');
+    document.body.classList.add('waiting-click');
+  } else if(cesiumViewer){
+    cesiumViewer.canvas.style.cursor='crosshair';
+  }
+}
+
+var _pnPending=null;
+var _pnPendingIs3D=false;
+var _pnTech='lorawan';
+
+function pnSelectTech(tech){
+  _pnTech=tech;
+  var bl=document.getElementById('pn-tech-lorawan');
+  var bm=document.getElementById('pn-tech-meshcore');
+  if(tech==='lorawan'){
+    if(bl){bl.style.background='rgba(0,229,255,.15)';bl.style.border='2px solid #00e5ff';bl.style.color='#fff';}
+    if(bm){bm.style.background='rgba(0,229,255,.05)';bm.style.border='1px solid rgba(0,229,255,.3)';bm.style.color='#fff';}
+  } else {
+    if(bm){bm.style.background='rgba(0,229,255,.15)';bm.style.border='2px solid #00e5ff';bm.style.color='#fff';}
+    if(bl){bl.style.background='rgba(0,229,255,.05)';bl.style.border='1px solid rgba(0,229,255,.3)';bl.style.color='#fff';}
+  }
+}
+function pnShowModal(lat,lng,type){
+  // Treure crosshair mentre s'escriu el nom
+  if(!is3D){map.getContainer().style.cursor='default';map.getContainer().classList.remove('waiting-click');document.body.classList.remove('waiting-click');}
+  else if(cesiumViewer){cesiumViewer.canvas.style.cursor='default';}
+  // En 3D assegurar modal visible al centre
+  var modal=document.getElementById('pn-modal');
+  if(modal&&is3D){
+    var _cm=document.getElementById('cesium-map');
+    if(_cm&&modal.parentNode!==_cm){
+      _cm.appendChild(modal);
+      modal.style.position='absolute';
+      modal.style.top='0';
+      modal.style.left='0';
+      modal.style.width='100%';
+      modal.style.height='100%';
+      modal.style.zIndex='99999';
+      modal.style.paddingLeft='0';
+    }
+  }
+  var typeLabels={gateway:'GATEWAY',sensor:'NODE SENSOR',torre:'TORRE'};
+  var typeIcons={gateway:'📡',sensor:'🌡',torre:'🗼'};
+  _pnPending={lat:lat,lng:lng,type:type};
+  _pnPendingIs3D=is3D;
+  _pnTech='lorawan';
+  // Amagar selector si es torre
+  var _techDiv=document.getElementById('pn-tech-lorawan');
+  var _techDiv2=document.getElementById('pn-tech-meshcore');
+  if(type==='torre'){
+    if(_techDiv)_techDiv.parentElement.style.display='none';
+  } else {
+    if(_techDiv)_techDiv.parentElement.style.display='flex';
+    pnSelectTech('lorawan');
+  }
+  var modal=document.getElementById('pn-modal');
+  var title=document.getElementById('pn-modal-title');
+  var input=document.getElementById('pn-modal-input');
+  if(!modal)return;
+  title.textContent=typeIcons[type]+' NOM DEL '+typeLabels[type];
+  var _al=is3D?pnItems3D:pnItems;
+  var count=_al.filter(function(i){return i.type===type;}).length+1;
+  var defaults={gateway:'Gateway '+count,sensor:'Node Sensor '+count,torre:'Torre '+count};
+  input.value=defaults[type];
+  modal.style.display='flex';
+  setTimeout(function(){input.focus();input.select();},50);
+  // Enter per confirmar
+  input.onkeydown=function(e){if(e.key==='Enter')pnModalConfirm();if(e.key==='Escape')pnModalCancel();};
+}
+
+function pnModalConfirm(){
+  var modal=document.getElementById('pn-modal');
+  var input=document.getElementById('pn-modal-input');
+  if(!_pnPending)return;
+  var name=input.value.trim()||'Node '+pnItems.length+1;
+  modal.style.display='none';
+  pnAddItem(_pnPending.lat,_pnPending.lng,_pnPending.type,name,_pnPendingIs3D);
+  _pnPending=null;
+  // Restaurar cursor crosshair per continuar posant nodes
+  if(pnMode&&pnCurrentType){
+    if(!is3D){map.getContainer().style.cursor='crosshair';}
+    else if(cesiumViewer){cesiumViewer.canvas.style.cursor='crosshair';}
+    var labels={gateway:'Gateway',sensor:'Node Sensor',torre:'Torre'};
+    var icons={gateway:'📡',sensor:'🌡',torre:'🗼'};
+    var hint=document.getElementById('los-hint');
+    if(hint){hint.textContent=icons[pnCurrentType]+' Clica al mapa per posar '+labels[pnCurrentType];hint.style.display='block';}
+  }
+}
+
+function pnModalCancel(){
+  var modal=document.getElementById('pn-modal');
+  if(modal){modal.style.display='none';modal.style.removeProperty("display");modal.style.display='none';}
+  _pnPending=null;
+  // Restaurar cursor si seguim en mode pn
+  pnCurrentType=null;
+  if(!is3D){map.getContainer().style.cursor='';map.getContainer().classList.remove('waiting-click');document.body.classList.remove('waiting-click');}
+  else if(cesiumViewer){cesiumViewer.canvas.style.cursor='';}
+  var hint=document.getElementById('los-hint');
+  if(hint){hint.textContent='📍 Obre el menú ⋮ per seleccionar tipus';hint.style.display='block';}
+}
+
+function pnAddItem(lat,lng,type,customName,forceIs3D){
+  var labels={gateway:'Gateway',sensor:'Node Sensor',torre:'Torre'};
+  var _mode3D=(typeof forceIs3D!=='undefined')?forceIs3D:is3D;
+  var _activeList=_mode3D?pnItems3D:pnItems;
+  var defaultName=labels[type]+' '+(_activeList.filter(function(i){return i.type===type;}).length+1);
+  var item={lat:lat,lng:lng,type:type,label:customName||defaultName,tech:_pnTech||'lorawan'};
+  _activeList.push(item);
+  // Marcador Leaflet (nomes 2D)
+  if(!_mode3D){
+  var _isMesh=item.tech==='meshcore';
+  var _gwColor=_isMesh?'#ff6400':'#0288d1';
+  var _snColor=_isMesh?'#00c080':'#EE2C2C';
+  var icons={
+    gateway: L.divIcon({className:'',html:'<div style="width:24px;height:24px;background:'+_gwColor+';border:2px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.5);">📡</div>',iconSize:[28,28],iconAnchor:[14,14]}),
+    sensor:  L.divIcon({className:'',html:'<svg width="30" height="30" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg"><circle cx="250" cy="250" r="200" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="2"/><circle cx="250" cy="250" r="185" fill="'+_snColor+'"/><g fill="white"><circle cx="250" cy="235" r="30"/><path d="M235 260 L265 260 L275 340 L225 340 Z"/><g fill="none" stroke="white" stroke-width="18" stroke-linecap="round"><path d="M210 195 A60 60 0 0 0 210 275"/><path d="M290 195 A60 60 0 0 1 290 275"/><path d="M185 170 A95 95 0 0 0 185 300"/><path d="M315 170 A95 95 0 0 1 315 300"/></g></g></svg>',iconSize:[28,28],iconAnchor:[14,14],popupAnchor:[0,-16]}),
+    torre:   L.divIcon({className:'',html:'<svg width="22" height="22" viewBox="100 135 380 380" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="bgBlue2" cx="32%" cy="24%" r="78%"><stop offset="0%" stop-color="#57a8f3"/><stop offset="38%" stop-color="#2c87d8"/><stop offset="72%" stop-color="#0f6fbe"/><stop offset="100%" stop-color="#005ea8"/></radialGradient></defs><circle cx="290" cy="325" r="190" fill="#f4f4f4"/><circle cx="290" cy="325" r="183" fill="url(#bgBlue2)"/><g fill="#f4f4f4"><path d="M194 233 H230 V255 H248 V233 H281 V255 H299 V233 H332 V255 H350 V233 H386 V286 H194 Z"/><path d="M214 296 H366 V451 H327 V362 C327 327 253 327 253 362 V451 H214 V296 Z"/><rect x="206" y="392" width="18" height="59"/><rect x="356" y="392" width="18" height="59"/></g><path d="M271 451 V366 C271 334 309 334 309 366 V451 Z" fill="#0f6fbe"/></svg>',iconSize:[22,22],iconAnchor:[11,11],popupAnchor:[0,-14]})
+  };
+  var m=L.marker([lat,lng],{icon:icons[type]}).bindPopup('<b>'+item.label+'</b><br>'+lat.toFixed(5)+', '+lng.toFixed(5));
+  m.addTo(map);
+  item.marker=m;
+  pnMarkers.push(m);
+  } // end !is3D
+  // Entitat Cesium (nomes en 3D)
+  if(_mode3D&&cesiumViewer){
+    var _isMesh3=item.tech==='meshcore';
+    var cesColors={gateway:_isMesh3?'#ff6400':'#0288d1',sensor:_isMesh3?'#00c080':'#ff3333',torre:'#ffab40'};
+    // Crear canvas per a la forma
+    function makeCesiumCanvas(shape, color){
+      var c=document.createElement('canvas');c.width=32;c.height=32;
+      var ctx=c.getContext('2d');
+      ctx.fillStyle=color;ctx.strokeStyle='#fff';ctx.lineWidth=2;
+      if(shape==='circle'){
+        ctx.beginPath();ctx.arc(16,16,13,0,Math.PI*2);ctx.fill();ctx.stroke();
+      } else if(shape==='triangle'){
+        ctx.beginPath();ctx.moveTo(16,3);ctx.lineTo(29,27);ctx.lineTo(3,27);ctx.closePath();ctx.fill();ctx.stroke();
+      } else if(shape==='hexagon'){
+        ctx.beginPath();
+        for(var i=0;i<6;i++){var a=Math.PI/180*(60*i-30);ctx.lineTo(16+13*Math.cos(a),16+13*Math.sin(a));}
+        ctx.closePath();ctx.fill();ctx.stroke();
+      }
+      return c;
+    }
+    var shapes={gateway:'circle',sensor:'triangle',torre:'hexagon'};
+    var cesCanvas=makeCesiumCanvas(shapes[type],cesColors[type]);
+    var ent=cesiumViewer.entities.add({
+      position:Cesium.Cartesian3.fromDegrees(lng,lat,30),
+      billboard:{
+        image:cesCanvas,
+        width:28,height:28,
+        heightReference:Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance:Number.POSITIVE_INFINITY,
+        verticalOrigin:Cesium.VerticalOrigin.BOTTOM
+      },
+      label:{text:item.label,font:'bold 10px Share Tech Mono',fillColor:Cesium.Color.WHITE,outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,pixelOffset:new Cesium.Cartesian2(0,-34),heightReference:Cesium.HeightReference.CLAMP_TO_GROUND,disableDepthTestDistance:Number.POSITIVE_INFINITY}
+    });
+    item.entity=ent;
+  }
+  pnRenderPanel();
+  // Reset cursor despres d afegir
+  pnCurrentType=null;
+  if(!is3D){map.getContainer().style.cursor='';map.getContainer().classList.remove('waiting-click');document.body.classList.remove('waiting-click');}else if(cesiumViewer){cesiumViewer.canvas.style.cursor='';}
+  var _hint=document.getElementById('los-hint');
+  if(_hint){_hint.textContent='📍 Obre el menu per seleccionar tipus';}
+}
+function pnRemoveItem(idx){
+  var _activeList=is3D?pnItems3D:pnItems;
+  var item=_activeList[idx];
+  if(item.marker){try{map.removeLayer(item.marker);}catch(e){}}
+  if(item.entity&&cesiumViewer){try{cesiumViewer.entities.remove(item.entity);}catch(e){}}
+  _activeList.splice(idx,1);
+  pnRenderPanel();
+}
+
+function pnClearAll(){
+  var _activeList=is3D?pnItems3D:pnItems;
+  _activeList.forEach(function(item){
+    if(item.marker){try{map.removeLayer(item.marker);}catch(e){}}
+    if(item.entity&&cesiumViewer){try{cesiumViewer.entities.remove(item.entity);}catch(e){}}
+  });
+  pnItems=[];
+  pnMenuOpen=false;
+  document.getElementById('pn-dots-menu').classList.remove('open');
+  pnRenderPanel();
+}
+
+function pnRenderPanel(){
+
+  // Agafar el panel-body correcte (el del panel visible)
+  var _panels=document.querySelectorAll('#pn-panel');
+  var _visPanel=null;
+  _panels.forEach(function(p){if(p.style.display!=='none')_visPanel=p;});
+  var body=_visPanel?_visPanel.querySelector('#pn-panel-body'):document.getElementById('pn-panel-body');
+  if(!body)return;
+  var _activeList=window.is3D?pnItems3D:pnItems;
+  var _pp2=document.getElementById('pn-panel');
+  if(_pp2&&!pnMode){_pp2.style.display='none';return;}
+  if(!_activeList.length){
+    body.innerHTML='<div style="color:rgba(0,229,255,.3);font-size:9px;padding:4px 0;">Cap node posat yet. Usa el menú ⋮ per afegir.</div>';
+    return;
+  }
+  var typeColors={gateway:'#0288d1',sensor:'#00e5ff',torre:'#ffab40'};
+  var techColors={lorawan:'#00e5ff',meshcore:'#ff6400'};
+  var typeIcons={gateway:'📡',sensor:'🌡',torre:'🗼'};
+  body.innerHTML=_activeList.map(function(item,i){
+    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(0,229,255,.08);">'+
+      '<div><span style="color:'+typeColors[item.type]+';margin-right:4px;">'+typeIcons[item.type]+'</span>'+
+      '<span style="color:#fff;font-size:9px;">'+item.label+'</span>'+
+      (item.type!=='torre'?'<span style="background:'+(item.tech==='meshcore'?'rgba(255,100,0,.2)':'rgba(0,229,255,.15)')+';color:'+(item.tech==='meshcore'?'#ff8c40':'#00e5ff')+';font-size:8px;margin-left:5px;border:1px solid currentColor;padding:1px 4px;border-radius:3px;font-weight:bold;">'+(item.tech==='meshcore'?'MESH':'LORA')+'</span>':'')+'<br>'+
+      '<span style="color:rgba(0,229,255,.4);font-size:8px;">'+item.lat.toFixed(5)+', '+item.lng.toFixed(5)+'</span></div>'+
+      '<button onclick="pnRemoveItem('+i+')" style="background:rgba(255,23,68,.1);border:1px solid rgba(255,23,68,.3);color:#ff1744;font-family:Share Tech Mono,monospace;font-size:10px;padding:2px 6px;border-radius:3px;cursor:pointer;">✕</button>'+
+      '</div>';
+  }).join('');
+}
+
+function pnExportCSV(){
+  var rows=['Tipus,Nom,Tecnologia,Latitud,Longitud'];
+  var _activeList=is3D?pnItems3D:pnItems;
+  _activeList.forEach(function(item){
+    rows.push([item.type,item.label,item.tech||'lorawan',item.lat.toFixed(6),item.lng.toFixed(6)].join(','));
+  });
+  var blob=new Blob([rows.join('\n')],{type:'text/csv'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='espurna_nodes.csv';a.click();
+}

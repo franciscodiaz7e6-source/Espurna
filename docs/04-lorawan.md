@@ -98,7 +98,7 @@ graph TD
 
 [api]
   bind = "0.0.0.0:8080"
-  secret = "espurna_collserola_secret_2026"
+  secret = "${CHIRPSTACK_SECRET}"
 ```
 
 ### Aspectes clau de la configuració
