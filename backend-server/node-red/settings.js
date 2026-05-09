@@ -1,9 +1,10 @@
 module.exports = {
+    credentialSecret: "espurna2026",
     adminAuth: {
         type: "credentials",
         users: [{
             username: "admin",
-            password: "$2b$12$9VcpnAx295F2Kfjs6n00jOheMJX.RjThM2zhSeX.tYLoihNzcXVtK",
+            password: "$2b$12$I0NvNO0Phnt4KOiKslrZ3ev0P9UOrU9SfSONmr317VyiqJog.hn8e",
             permissions: "*"
         }],
         default: {

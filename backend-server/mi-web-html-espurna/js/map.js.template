@@ -405,14 +405,14 @@ function initMap(){
   document.addEventListener('visibilitychange',function(){if(document.hidden)stopRaf();else startRaf();});
 }
 
-function makeNodeIcon(i){
-  var d=nodeData[i];
+function makeNodeIcon(i,forceColor,nodeOverride){
+  var d=nodeOverride!==undefined?nodeOverride:nodeData[i];
   var isCrit=d&&d.temp>40,isWarn=d&&(d.temp>35||(d.soil!==null&&d.soil<15));
-  var cls=isCrit?'crit':isWarn?'warn':'',rc=isCrit?'#ff1744':isWarn?'#ffab40':'#00ff88';
+  var cls=isCrit?'crit':isWarn?'warn':'';var rc=forceColor||(isCrit?'#ff1744':isWarn?'#ffab40':'#00ff88');
   return L.divIcon({className:'',
     html:'<div style="position:relative;width:36px;height:36px;display:flex;align-items:center;justify-content:center;">'+
       '<div class="node-pulse-ring" style="border-color:'+rc+';top:1px;left:1px;"></div>'+
-      '<div class="node-dot '+cls+'" style="position:relative;z-index:1;"></div></div>',
+      '<div class="node-dot '+cls+'" style="position:relative;z-index:1;border-color:'+rc+';box-shadow:0 0 8px '+rc+',0 0 16px '+rc+';"></div></div>',
     iconSize:[36,36],iconAnchor:[18,18],popupAnchor:[0,-22]});
 }
 function offlineIcon(){
@@ -439,33 +439,76 @@ function createNodeMarker(i){
 }
 function updateNodePopup(i){
   if(!nodeMarkers[i])return;
-  var cfg=NODES[i],d=nodeData[i];
-  var online=d&&d.rawTime&&isOnline(d.rawTime);
+  var cfg=activeNodes()[i]||NODES[i];
+  var d=activeNodeData()[i];
+  var isMC=isMeshcoreMode();
+  var isRelay=cfg.type==='gateway'||cfg.type==='repeater';
+  var relayOnline=d&&d.status==='relay';
+  var online=(d&&d.status==='online'&&isOnline(d.rawTime));
+  // Popup simplificat per GW i repetidors
+  if(isRelay){
+    var _typeIco=cfg.type==='gateway'?'🌐':'📡';
+    var _col=relayOnline?'var(--green)':'rgba(128,128,128,.4)';
+    var _colHex=relayOnline?'#00ff88':'rgba(128,128,128,.3)';
+    var _shadow=relayOnline?'0 0 4px #00ff88,0 0 12px #00ff88':'none';
+    var _anim=relayOnline?'blink 1.4s ease-in-out infinite':'none';
+    var _stTxt=relayOnline?'ONLINE':'OFFLINE';
+    nodeMarkers[i].bindPopup(
+      '<div class="popup-title" style="color:'+_col+';text-shadow:none">'+_typeIco+' '+cfg.id+'</div>'+
+      '<div class="popup-row"><span>Label</span><span class="popup-val" style="color:var(--txt2)">'+cfg.label+'</span></div>'+
+      '<div class="popup-row"><span>Estat</span><span class="popup-val" style="color:'+_col+'">'+
+        '<span class="sdot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:'+_colHex+';box-shadow:'+_shadow+';animation:'+_anim+';margin-right:4px;vertical-align:middle;"></span>'+
+        _stTxt+'</span></div>'+
+      '<div class="popup-coords">Lat: '+cfg.lat.toFixed(6)+' · Lng: '+cfg.lng.toFixed(6)+'</div>'
+    );
+    // Icona igual que GW LoRaWAN per gateway, dot verd/gris per repeater
+    var _ic=cfg.type==='gateway'
+      ?L.divIcon({className:'',html:'<div class="gw-icon-wrap"><div class="gw-hex-icon"><div class="gw-dot"></div></div></div>',iconSize:[30,30],iconAnchor:[15,15],popupAnchor:[0,-20]})
+      :L.divIcon({className:'',html:'<div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;position:relative;">'+
+          '<div class="node-pulse-ring" style="border-color:'+_colHex+';top:1px;left:1px;'+(relayOnline?'':'animation:none;opacity:.3;')+'"></div>'+
+          '<div style="width:14px;height:14px;border-radius:50%;background:'+(relayOnline?'rgba(0,255,136,.15)':'rgba(128,128,128,.1)')+';border:2.5px solid '+_colHex+';box-shadow:'+_shadow+';position:relative;z-index:1;"></div></div>',
+        iconSize:[36,36],iconAnchor:[18,18],popupAnchor:[0,-22]});
+    nodeMarkers[i].setIcon(_ic);
+    return;
+  }
   var isCrit=d&&d.temp>40,isWarn=d&&(d.temp>35||(d.soil!==null&&d.soil<15));
   var vibrantColor=isCrit?'var(--red)':isWarn?'var(--amber)':'var(--green)';
-  var stColor=online?'var(--green)':offlineColor();
+  var stColor=online?vibrantColor:offlineColor();
   var stTxt=online?'● ONLINE':'○ OFFLINE (MEMÒRIA)';
   var hasData=d&&d.temp!==null;
   var rtColor=isCrit?'var(--red)':isWarn?'var(--amber)':hasData?'var(--green)':txtColor();
   var rt=isCrit?'⚠ CRÍTIC':isWarn?'⚠ MODERAT':hasData?'✓ NORMAL':'—';
   var ultimaDada=hasData?(timeSince(d.rawTime)||'—'):'—';
-  var rssiColor=txtColor(),snrColor=txtColor();
-  if(d&&d.rssi!=null)rssiColor=d.rssi>-85?'var(--green)':d.rssi>-105?'var(--amber)':'var(--red)';
-  if(d&&d.snr!=null)snrColor=d.snr>5?'var(--green)':d.snr>0?'var(--amber)':'var(--red)';
-  var batV=d&&d.bat_mv?(d.bat_mv/1000).toFixed(2)+'V':'—';
-  var batStr=d&&d.bat_pct!=null?(d.bat_pct+'% ('+batV+')'):'—';
-  var batCol=d&&d.bat_pct!=null?batColor(d.bat_pct):txtColor();
+  var extraRows='';
+  if(isMC){
+    var batV=d&&d.bat_mv?(d.bat_mv/1000).toFixed(2)+'V':'—';
+    var batCol=d&&d.bat_mv?(d.bat_mv>3600?'var(--green)':d.bat_mv>3300?'var(--amber)':'var(--red)'):txtColor();
+    var tSol=d&&d.temp_suelo!=null?d.temp_suelo.toFixed(1)+' °C':'—';
+    extraRows='<div style="margin:8px 0;border-top:1px dashed rgba(128,128,128,.3);padding-top:6px;">'+
+      '<div class="popup-row" style="font-size:8.5px;"><span>Bateria</span><span class="popup-val" style="color:'+batCol+'">'+batV+'</span></div></div>';
+  } else {
+    var rssiColor=txtColor(),snrColor=txtColor();
+    if(d&&d.rssi!=null)rssiColor=d.rssi>-85?'var(--green)':d.rssi>-105?'var(--amber)':'var(--red)';
+    if(d&&d.snr!=null)snrColor=d.snr>5?'var(--green)':d.snr>0?'var(--amber)':'var(--red)';
+    var batV2=d&&d.bat_mv?(d.bat_mv/1000).toFixed(2)+'V':'—';
+    var batStr=d&&d.bat_pct!=null?(d.bat_pct+'% ('+batV2+')'):'—';
+    var batCol2=d&&d.bat_pct!=null?batColor(d.bat_pct):txtColor();
+    extraRows='<div style="margin:8px 0;border-top:1px dashed rgba(128,128,128,.3);padding-top:6px;">'+
+      '<div class="popup-row" style="font-size:8.5px;"><span>Senyal (RSSI)</span><span class="popup-val" style="color:'+rssiColor+'">'+(d&&d.rssi?d.rssi+' dBm':'—')+'</span></div>'+
+      '<div class="popup-row" style="font-size:8.5px;"><span>Qualitat (SNR)</span><span class="popup-val" style="color:'+snrColor+'">'+(d&&d.snr?d.snr+' dB':'—')+'</span></div>'+
+      '<div class="popup-row" style="font-size:8.5px;"><span>Bateria</span><span class="popup-val" style="color:'+batCol2+'">'+batStr+'</span></div></div>';
+  }
   nodeMarkers[i].bindPopup(
     '<div class="popup-title" style="color:'+(online?vibrantColor:txt2Color())+';text-shadow:none">◈ '+cfg.id+'</div>'+
     '<div class="popup-row"><span>Estat</span><span class="popup-val" style="color:'+stColor+'">'+stTxt+'</span></div>'+
     '<div class="popup-row"><span>Temperatura</span><span class="popup-val">'+(hasData?d.temp.toFixed(1)+' °C':'—')+'</span></div>'+
     '<div class="popup-row"><span>Hum. Aire</span><span class="popup-val">'+(hasData&&d.hum!=null?d.hum.toFixed(1)+' %':'—')+'</span></div>'+
-    '<div class="popup-row"><span>Hum. Sòl</span><span class="popup-val">'+(hasData&&d.soil!=null?d.soil+' %':'—')+'</span></div>'+
+    (isMC?
+      '<div class="popup-row"><span>Hum. Sòl</span><span class="popup-val">'+(hasData&&d.soil!=null?d.soil+'%':'—')+'</span></div>'+
+      '<div class="popup-row"><span>T. Sòl</span><span class="popup-val">'+(hasData&&d.temp_suelo!=null?d.temp_suelo.toFixed(1)+' °C':'—')+'</span></div>':
+      '<div class="popup-row"><span>Hum. Sòl</span><span class="popup-val">'+(hasData&&d.soil!=null?d.soil+' %':'—')+'</span></div>')+
     '<div class="popup-row"><span>Risc</span><span class="popup-val" style="color:'+rtColor+'">'+rt+'</span></div>'+
-    '<div style="margin:8px 0;border-top:1px dashed rgba(128,128,128,.3);padding-top:6px;">'+
-    '<div class="popup-row" style="font-size:8.5px;"><span>Senyal (RSSI)</span><span class="popup-val" style="color:'+rssiColor+'">'+(d&&d.rssi?d.rssi+' dBm':'—')+'</span></div>'+
-    '<div class="popup-row" style="font-size:8.5px;"><span>Qualitat (SNR)</span><span class="popup-val" style="color:'+snrColor+'">'+(d&&d.snr?d.snr+' dB':'—')+'</span></div>'+
-    '<div class="popup-row" style="font-size:8.5px;"><span>Bateria</span><span class="popup-val" style="color:'+batCol+'">'+batStr+'</span></div></div>'+
+    extraRows+
     '<div class="popup-row"><span>Última dada</span><span class="popup-val">'+ultimaDada+'</span></div>'+
     '<div class="popup-coords">Lat: '+cfg.lat.toFixed(6)+' · Lng: '+cfg.lng.toFixed(6)+'</div>'
   );
@@ -479,9 +522,28 @@ function updateLines(){
   });
 }
 function updateCoordsBar(){
-  document.getElementById('coordsAll').innerHTML=NODES.map(function(c,i){
+  var nodes=activeNodes();
+  document.getElementById('coordsAll').innerHTML=nodes.map(function(c,i){
+    var _typeColors={'gateway':'var(--cyan)','repeater':'#a259ff','sensor':'rgba(0,255,136,.7)'};
+    var _typeLabels={'gateway':'GW','repeater':'RP'+(i),'sensor':'S'+(i)};
+    // Comptar per tipus
+    var _gwCount=0,_rpCount=0,_sCount=0;
+    var _lbl;
+    if(isMeshcoreMode()){
+      if(c.type==='gateway'){_lbl='GW';}
+      else if(c.type==='repeater'){
+        var _rpIdx=nodes.slice(0,i).filter(function(n){return n.type==='repeater';}).length+1;
+        _lbl='RP'+_rpIdx;
+      } else {
+        var _sIdx=nodes.slice(0,i).filter(function(n){return n.type==='sensor';}).length+1;
+        _lbl='S'+_sIdx;
+      }
+    } else {
+      _lbl='N'+(i+1);
+    }
+    var _col='rgba(0,255,136,.7)';
     return '<span style="display:inline-flex;gap:4px;">'+
-      '<span style="color:rgba(0,255,136,.5)">N'+(i+1)+':</span>'+
+      '<span style="color:'+_col+'">'+_lbl+':</span>'+
       '<span style="color:var(--cyan)">'+c.lat.toFixed(5)+','+c.lng.toFixed(5)+'</span>'+
       '<span style="color:var(--txt3);font-size:8px">'+(c.deployed?'✓':'○')+'</span></span>';
   }).join('<span style="color:var(--txt3);margin:0 5px">|</span>');
@@ -496,15 +558,35 @@ function toggleEditMode(){
   if(!editMode){updateLines();updateCoordsBar();nodeMarkers.forEach(function(_,i){updateNodePopup(i);});}
 }
 function updateMapMarkers(){
+  var _an=activeNodes();
+  var _ad=activeNodeData();
+  // Amagar/mostrar gwMarker LoRaWAN segons mode
+  if(typeof gwMarker!=='undefined'&&gwMarker){
+    gwMarker.setOpacity(isMeshcoreMode()?0:1);
+  }
   nodeMarkers.forEach(function(m,i){
     if(!m)return;
-    var d=nodeData[i],online=d&&d.status==='online'&&isOnline(d.rawTime);
+    // Reposicionar marcador a les coordenades del node actiu
+    var _cfg=_an[i];
+    if(_cfg&&_cfg.lat&&_cfg.lng){
+      m.setLatLng([_cfg.lat,_cfg.lng]);
+      if(nodeCircles[i])nodeCircles[i].setLatLng([_cfg.lat,_cfg.lng]);
+      if(nodeLines[i])nodeLines[i].setLatLngs([[_cfg.lat,_cfg.lng],[GW.lat,GW.lng]]);
+    }
+    var d=_ad[i];
+    var isRelayNode=d&&d.status==='relay';
+    var relayOnline=isRelayNode;
+    var online=(d&&d.status==='online'&&isOnline(d.rawTime))||isRelayNode;
     var isCrit=d&&d.temp>40,isWarn=d&&(d.temp>35||(d.soil!==null&&d.soil<15));
-    var color=isCrit?'#ff1744':isWarn?'#ffab40':'#00ff88';
-    if(online){
-      m.setIcon(makeNodeIcon(i));
+    var color=isRelayNode?'#00e5ff':isCrit?'#ff1744':isWarn?'#ffab40':'#00ff88';
+    if(isRelayNode){
+      var _rCol=relayOnline?'#00ff88':'rgba(128,128,128,.3)';
+      if(nodeCircles[i])nodeCircles[i].setStyle({color:_rCol,fillColor:_rCol,opacity:.3,fillOpacity:.04});
+      if(nodeLines[i])nodeLines[i].setStyle({color:_rCol,opacity:.25,weight:1.5,dashArray:'4 6'});
+    } else if(online){
+      m.setIcon(makeNodeIcon(i,null,d));
       if(nodeCircles[i])nodeCircles[i].setStyle({color:color,fillColor:color,opacity:.4,fillOpacity:.05});
-      if(nodeLines[i])nodeLines[i].setStyle({color:'#00e5ff',opacity:.18,weight:1,dashArray:'4 8'});
+      if(nodeLines[i])nodeLines[i].setStyle({color:color,opacity:.25,weight:1,dashArray:'4 8'});
     } else {
       m.setIcon(offlineIcon());
       if(nodeCircles[i])nodeCircles[i].setStyle({opacity:0,fillOpacity:0});

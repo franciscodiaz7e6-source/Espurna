@@ -37,7 +37,7 @@ function rafLoop(ts){
   ctx.clearRect(0,0,_cW,_cH);
   for(var i=0;i<packetBurst.length;i++) if(packetBurst[i]>0) packetBurst[i]=Math.max(0,packetBurst[i]-dt);
   packets.forEach(function(pkt){
-    var cfg=NODES[pkt.nodeIdx],d=nodeData[pkt.nodeIdx];
+    var cfg=NODES[pkt.nodeIdx],d=activeNodeData()[pkt.nodeIdx];
     var online=d&&d.status==='online'&&isOnline(d.rawTime);
     var burstRem=packetBurst[pkt.nodeIdx];
     var active=online&&burstRem>0;

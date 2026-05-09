@@ -1,34 +1,9 @@
-# Credenciales y secretos
 .env
-.env.local
-.env.staging
 *.key
+*.pem
 *.crt
-passwd
-flows_cred.json
-
-# Compilación
-build/
-*.o
-*.elf
-.pio/
-
-# Dependencies
+*.p12
 node_modules/
-venv/
 __pycache__/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Sistema
+*.pyc
 .DS_Store
-Thumbs.db
-
-# Datos
-backups/*.db
-*.log
-temp/

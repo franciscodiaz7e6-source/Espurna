@@ -22,13 +22,17 @@ services:
       - ./chirpstack:/etc/chirpstack
     environment:
       - TZ=Europe/Madrid
+      - CHIRPSTACK_SECRET=696f31438154e577824eda8229ca23a0285145b4fb20631ba7c33447706c6da8
     networks:
       - lorawan-net
       - backend-iot-network
     depends_on:
-      - postgres
-      - redis
-      - chirpstack-mqtt
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      chirpstack-mqtt:
+        condition: service_started
 
   chirpstack-rest-api:
     image: chirpstack/chirpstack-rest-api:4
@@ -44,17 +48,24 @@ services:
       - chirpstack
 
   postgres:
-    image: postgres:14-alpine
+    image: postgres:16-alpine
     container_name: chirpstack-postgres
     restart: unless-stopped
     environment:
       - POSTGRES_DB=chirpstack
       - POSTGRES_USER=chirpstack
       - POSTGRES_PASSWORD=chirpstack_espurna
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chirpstack"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
     networks:
       - lorawan-net
+      - backend-iot-network
 
   redis:
     image: redis:7-alpine
@@ -74,8 +85,4 @@ networks:
 
 volumes:
   postgres-data:
-    external: true
-    name: lorawan-gateway_postgres-data
   redis-data:
-    external: true
-    name: lorawan-gateway_redis-data

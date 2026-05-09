@@ -1,4 +1,4 @@
-"""FireSense AI Bot — Telegram.
+"""Espurna AI Bot — Telegram.
 
 Comandos:
   /start, /help              Ayuda
@@ -26,7 +26,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s - %(message)s",
 )
-log = logging.getLogger("firesense-bot")
+log = logging.getLogger("espurna-bot")
 
 TELEGRAM_MAX_LEN = 4000  # margen sobre los 4096 oficiales
 
@@ -80,7 +80,7 @@ async def _ask_model(update: Update, system: str, user_msg: str, temperature: fl
 async def cmd_start(update: Update, _: ContextTypes.DEFAULT_TYPE):
     await _reply(
         update,
-        "🔥 *FireSense AI Bot*\n\n"
+        "🔥 *Espurna AI Bot*\n\n"
         "Comandos:\n"
         "• /status — última lectura\n"
         "• /risk — análisis de riesgo de incendio\n"
@@ -203,7 +203,7 @@ def main() -> None:
     app.add_handler(CommandHandler("anomalies", cmd_anomalies))
     app.add_handler(CommandHandler("report", cmd_report))
     app.add_handler(CommandHandler("ask", cmd_ask))
-    log.info("FireSense AI Bot arrancando (modelo=%s)", config.OLLAMA_MODEL)
+    log.info("Espurna AI Bot arrancando (modelo=%s)", config.OLLAMA_MODEL)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

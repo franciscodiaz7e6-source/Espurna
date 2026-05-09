@@ -1,20 +1,68 @@
 // ── UI / DOM UPDATES ───────────────────────────────────────
 function updateNodeButtons(){
+  var _an=activeNodes();
+  // En meshcore: només mostrar botons de sensors (type==='sensor'), no GW ni REP
+  var _visibleNodes=isMeshcoreMode()?_an.filter(function(n){return n.type==='sensor';}):_an;
+  var _btnIdx=0;
   for(var j=0;j<5;j++){
     var btn=document.getElementById('nb'+j);if(!btn)continue;
-    btn.className='nbtn'+(j===selIdx?' active':NODES[j].deployed?'':' off');
+    if(isMeshcoreMode()){
+      // Trobar el node real corresponent al botó visible
+      if(_btnIdx>=_visibleNodes.length){
+        btn.style.display='none';
+      } else {
+        var _realIdx=_an.indexOf(_visibleNodes[_btnIdx]);
+        btn.style.display='';
+        btn.textContent=_visibleNodes[_btnIdx].label;
+        btn.onclick=(function(ri){return function(){selNode(ri);};}(_realIdx));
+        btn.className='nbtn'+(selIdx===_realIdx?' active':_visibleNodes[_btnIdx].deployed?'':' off');
+        _btnIdx++;
+      }
+    } else {
+      if(j>=_an.length){
+        btn.style.display='none';
+      } else {
+        btn.style.display='';
+        btn.textContent=_an[j].label;
+        btn.onclick=(function(ri){return function(){selNode(ri);};}(j));
+        btn.className='nbtn'+(j===selIdx?' active':_an[j].deployed?'':' off');
+      }
+    }
   }
+  // Actualitzar nodeStatus: comptar només sensors desplegats en meshcore
+  var _allNodes=isMeshcoreMode()?MESHCORE_NODES:NODES; var _deployed=_allNodes.filter(function(n){return n.deployed;}).length;
+  var _online=activeNodeData().filter(function(d){return d&&(d.status==='online'||d.status==='relay');}).length;
+  var _ns=document.getElementById('nodeStatus');
+  if(_ns)_ns.textContent=_online+' online / '+_deployed+' desplegats';
 }
 
 function selNode(i){
+  var _dCheck=(activeNodeData()||[])[i];
+  var _cfgCheck=(activeNodes()||NODES)[i];
+  // Si és GW o repeater, no canviar el panell de dades en viu
+  if(_cfgCheck&&(_cfgCheck.type==='gateway'||_cfgCheck.type==='repeater'))return;
   selIdx=i;updateNodeButtons();updateNextTxCountdown();
-  var d=nodeData[i],cfg=NODES[i];
+  var d=(activeNodeData()||[])[i],cfg=(activeNodes()||NODES)[i]||NODES[i];
   var titleEl=document.getElementById('liveCardTitle');
   var cardBorder=document.getElementById('liveCardBorder');
   var rEl=document.getElementById('riskSt');
-  document.getElementById('histLbl').textContent=cfg.id;
-  document.getElementById('nodeCoords').textContent=cfg.lat.toFixed(6)+', '+cfg.lng.toFixed(6);
+  document.getElementById('histLbl').textContent=cfg?cfg.id:'—';
+  document.getElementById('nodeCoords').textContent=(cfg&&cfg.lat)?cfg.lat.toFixed(6)+', '+cfg.lng.toFixed(6):'—';
 
+  if(d&&d.status==='relay'){
+    titleEl.innerHTML='<div class="live-dot"></div>EN XARXA';
+    titleEl.className='card-title ct-g';
+    cardBorder.className='card card-l-green';
+    rEl.textContent='● ONLINE';rEl.style.color='var(--green)';rEl.style.textShadow='';
+    document.getElementById('mainT').textContent='—';
+    document.getElementById('mainH').textContent='—';
+    document.getElementById('mainS').textContent='—';
+    var fCntEl3=document.getElementById('fCnt');if(fCntEl3){fCntEl3.textContent='—';fCntEl3.style.color=txtColor();}
+    document.getElementById('lastSeen').textContent='—';
+    var batEl3=document.getElementById('batPct');batEl3.textContent='—';batEl3.style.color=txtColor();
+    document.getElementById('histList').innerHTML='<div class="hrow" style="font-style:italic;"><span>Node enrutament — sense dades de sensor</span></div>';
+    return;
+  }
   if(!d||d.temp===null||d.status==='waiting'){
     document.getElementById('mainT').textContent='—';
     document.getElementById('mainH').textContent='—';
@@ -37,8 +85,52 @@ function selNode(i){
   var sEl=document.getElementById('mainS');
   sEl.textContent=d.soil!==null?d.soil:'—';
   sEl.className='mmini-val vs'+(d.soil!==null&&d.soil<15?' dry':'');
-  document.getElementById('fCnt').textContent=d.fCnt||'—';
+  var _isCrit=d.temp>40,_isWarn=d.temp>35||(d.soil!==null&&d.soil<15);
+  var _riskTxt=_isCrit?'⚠ CRÍTIC':_isWarn?'⚠ MODERAT':'✓ NORMAL';
+  var _riskCol=_isCrit?'var(--red)':_isWarn?'var(--amber)':'var(--green)';
+  var fCntEl=document.getElementById('fCnt');
+  if(fCntEl){fCntEl.textContent=_riskTxt;fCntEl.style.color=_riskCol;}
   document.getElementById('lastSeen').textContent=timeSince(d.rawTime)||d.time||'—';
+  // Sòl: meshcore=temp_suelo en °C, lorawan=humedad_suelo en %
+  var tsolEl=document.getElementById('mainS');
+  var tsolLbl=document.getElementById('mainSLbl');
+  var tsolUnit=document.getElementById('mainSUnit');
+  var humEl=document.getElementById('mainH');
+  var humLbl=document.getElementById('mainHLbl');
+  var humUnit=document.getElementById('mainHUnit');
+  if(isMeshcoreMode()){
+    // Mostrar H.Sòl % + T.Sòl °C junts: "4% / 25.3°C"
+    if(tsolLbl)tsolLbl.textContent='Sòl';
+    if(tsolUnit)tsolUnit.textContent='';
+    var _hSoil=d.soil!==null?d.soil+'%':'—';
+    var _tSoil=d.temp_suelo!=null?d.temp_suelo.toFixed(1)+'°C':'—';
+    tsolEl.innerHTML='<span style="color:var(--green);">'+_hSoil+'</span> / <span style="color:var(--cyan);">'+_tSoil+'</span>';
+    tsolEl.className='mmini-val vs';
+    tsolEl.style.fontSize='22px';
+    tsolEl.style.letterSpacing='-0.5px';
+    tsolEl.style.lineHeight='1';
+    tsolEl.style.display='flex';
+    tsolEl.style.flexDirection='row';
+    tsolEl.style.alignItems='center';
+    tsolEl.style.justifyContent='center';
+    tsolEl.style.flexWrap='wrap';
+    tsolEl.style.gap='4px';
+    tsolEl.style.height='auto';
+    tsolEl.style.marginTop='12px';
+    if(humLbl)humLbl.textContent='Hum. Aire';
+    if(humUnit)humUnit.textContent='% RH';
+    if(humEl)humEl.textContent=d.hum!==null?d.hum.toFixed(1):'—';
+    if(humEl)humEl.style.fontSize='';
+  } else {
+    if(tsolLbl)tsolLbl.textContent='Hum. Sòl';
+    if(tsolUnit)tsolUnit.textContent='% VWC';
+    tsolEl.textContent=d.soil!==null?d.soil:'—';
+    tsolEl.style.fontSize='';
+    tsolEl.className='mmini-val vs'+(d.soil!==null&&d.soil<15?' dry':'');
+    if(humLbl)humLbl.textContent='Hum. Aire';
+    if(humUnit)humUnit.textContent='% RH';
+    if(humEl)humEl.style.fontSize='';
+  }
 
   var batEl=document.getElementById('batPct');
   if(d.bat_pct!==null){
@@ -91,10 +183,10 @@ function selNode(i){
       var batCol=r.bat_pct!=null?(r.bat_pct>50?'var(--green)':r.bat_pct>20?'var(--amber)':'var(--red)'):'var(--txt3)';
       return '<div class="hrow" style="justify-content:space-between;">'+
         '<span style="color:var(--cyan);font-size:11px;font-weight:600;min-width:36px;">'+r.time+'</span>'+
-        '<div style="display:flex;gap:6px;justify-content:center;align-items:center;">'+
+        '<div style="display:flex;gap:14px;justify-content:center;align-items:center;">'+
         '<span class="ht">'+(r.temp!==null?r.temp.toFixed(1):'—')+'°C</span>'+
         '<span class="hh">'+(r.hum!==null?(typeof r.hum==='number'?r.hum.toFixed(0):r.hum):'—')+'%</span>'+
-        '<span class="hs">'+(r.soil!==null?r.soil:'—')+'%</span>'+
+        '<span class="hs">'+(isMeshcoreMode()?(r.soil!==null?r.soil+'%':'—')+(r.temp_suelo!=null?'/'+r.temp_suelo.toFixed(1)+'°C':''):(r.soil!==null?r.soil:'—')+'%')+'</span>'+
         '</div>'+
         '<span style="color:'+batCol+';font-size:10.5px;min-width:80px;text-align:right;">'+batStr+'</span>'+
         '</div>';
@@ -103,22 +195,46 @@ function selNode(i){
 }
 
 function checkAlerts(){
-  var crit=nodeData.filter(function(d){return d&&d.temp>40&&d.status==='online';});
-  var warn=nodeData.filter(function(d){return d&&d.temp>35&&d.temp<=40&&d.status==='online';});
+  var crit=activeNodeData().filter(function(d){return d&&d.temp>40&&d.status==='online';});
+  var warn=activeNodeData().filter(function(d){return d&&d.temp>35&&d.temp<=40&&d.status==='online';});
   var box=document.getElementById('alertBox');
   box.classList.remove('on');
 }
 
 function renderGrid(){
-  document.getElementById('sgrid').innerHTML=NODES.map(function(cfg,i){
-    var d=nodeData[i];
+  document.getElementById('sgrid').innerHTML=activeNodes().map(function(cfg,i){
+    var d=activeNodeData()[i];
     var hasData=d&&d.temp!==null;
+    var isRelay=d&&d.status==='relay';
     var online=d&&d.status==='online'&&isOnline(d.rawTime);
+    // Icona i color per tipus de node
+    var _typeIco={'gateway':'🌐','repeater':'📡','sensor':'🌿'}[cfg.type]||'●';
+    var _typeCol={'gateway':'#00e5ff','repeater':'#a259ff','sensor':'#00ff88'}[cfg.type]||'var(--txt2)';
+    var _typeLbl={'gateway':'GATEWAY','repeater':'REPETIDOR','sensor':'SENSOR'}[cfg.type]||cfg.type||'';
+    // Nodes relay (GW/REP): card especial sense dades de sensor
+    var _relayOnline = d && d.status === 'relay';
+    var _relayCol = _relayOnline ? '#00ff88' : '#ff1744';
+    var _relayShadow = _relayOnline ? '0 0 4px #00ff88,0 0 12px #00ff88,0 0 28px rgba(0,255,136,.5)' : '0 0 4px #ff1744,0 0 12px #ff1744,0 0 28px rgba(255,23,68,.5)';
+    var _relayLabel = _relayOnline ? 'ACTIU' : 'OFFLINE';
+    var _relayLabelFinal = _relayOnline ? 'ONLINE' : 'OFFLINE';
+    if(isRelay)return '<div class="scard">'+
+      '<div class="sacc" style="background:'+_relayCol+';box-shadow:'+_relayShadow+';"></div>'+
+      '<div class="shdr">'+
+      '<span class="sid" style="color:'+_relayCol+'">'+_typeIco+' '+cfg.id+'</span>'+
+      '<span class="sst" style="color:'+_relayCol+'"><span class="sdot" style="background:'+_relayCol+';box-shadow:'+_relayShadow+';animation:'+(_relayOnline?'blink 1.4s ease-in-out infinite':'none')+'"></span>'+_relayLabelFinal+'</span>'+
+      '</div>'+
+      '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:4px;margin-bottom:7px;min-height:60px;">'+
+      '<div style="font-size:1.8rem;">'+_typeIco+'</div>'+
+      '<div style="color:'+_relayCol+';font-size:10px;letter-spacing:2px;font-family:var(--mono);font-weight:700;margin-top:2px;">'+_typeLbl+'</div>'+
+      '<div style="color:var(--txt3);font-size:9px;font-family:var(--mono);margin-top:6px;">'+cfg.label+'</div>'+
+      '</div>'+
+      '<div class="sftr"><span style="color:var(--txt3);">Enrutament MeshCore</span><span style="color:'+_relayCol+';">'+(_relayOnline?'● EN XARXA':'○ FORA DE XARXA')+'</span></div>'+
+      '</div>';
     if(!hasData)return '<div class="scard card-l-stale stale-card">'+
       '<div class="sacc" style="background:rgba(128,128,128,.2);box-shadow:none;"></div>'+
       '<div class="shdr"><span class="sid" style="color:var(--txt2)">'+cfg.id+'</span>'+
       '<span class="sst" style="color:var(--txt3)"><span class="sdot stale-dot"></span>'+(cfg.deployed?'SENSE DADES':'PENDENT')+'</span></div>'+
-      '<div class="svals">'+['Temp','Hum.Aire','Hum.Sòl'].map(function(l){
+      '<div class="svals">'+['Temp','Hum.Aire',isMeshcoreMode()?'T.Sòl':'Hum.Sòl'].map(function(l){
         return '<div class="sv"><div class="svl">'+l+'</div><div class="svn" style="color:var(--txt3);font-size:1.6rem;">—</div></div>';
       }).join('')+'</div>'+
       '<div class="sftr"><span>'+(cfg.deployed?'Esperant paquets...':'Pendent desplegament')+'</span></div></div>';
@@ -130,12 +246,12 @@ function renderGrid(){
     return '<div class="scard '+cardClass+'">'+
       '<div class="sacc" style="background:'+(online?acc:'rgba(128,128,128,.2)')+';box-shadow:'+(online?(isCrit?'0 0 4px #ff1744,0 0 12px #ff1744,0 0 28px rgba(255,23,68,.5)':isWarn?'0 0 4px #ffab40,0 0 12px #ffab40,0 0 28px rgba(255,171,64,.5)':'0 0 4px #00ff88,0 0 12px #00ff88,0 0 28px rgba(0,255,136,.5)'):'none')+'"></div>'+
       '<div class="shdr">'+
-      '<span class="sid" style="color:'+(online?acc:'var(--txt2)')+'">'+cfg.id+'</span>'+
+      '<span class="sid" style="color:'+(online?acc:'var(--txt2)')+'">'+(cfg.type==='gateway'?'🌐 ':cfg.type==='repeater'?'📡 ':'')+cfg.id+'</span>'+
       '<span class="sst" style="color:'+(online?acc:'var(--txt3)')+'"><span class="sdot" style="background:'+(online?accHex:'rgba(128,128,128,.3)')+';box-shadow:'+(online?(isCrit?'0 0 4px #ff1744,0 0 12px #ff1744,0 0 24px rgba(255,23,68,.5)':isWarn?'0 0 4px #ffab40,0 0 12px #ffab40,0 0 24px rgba(255,171,64,.5)':'0 0 4px #00ff88,0 0 12px #00ff88,0 0 24px rgba(0,255,136,.5)'):'none')+';animation:'+(online?'blink 1.4s ease-in-out infinite':'none')+'"></span>'+(online?'ONLINE':'OFFLINE')+'</span></div>'+
       '<div class="svals">'+
       '<div class="sv"><div class="svl">Temp</div><div class="svn '+(isCrit?'vt hot':'vt')+'">'+d.temp.toFixed(1)+'</div><div class="svu">°C</div></div>'+
       '<div class="sv"><div class="svl">Hum.Aire</div><div class="svn vh">'+(d.hum!==null?d.hum.toFixed(0):'—')+'</div><div class="svu">%</div></div>'+
-      '<div class="sv"><div class="svl">Hum.Sòl</div><div class="svn '+(d.soil!==null&&d.soil<15?'vs dry':'vs')+'">'+(d.soil!==null?d.soil:'—')+'</div><div class="svu">%</div></div>'+
+      (isMeshcoreMode()?'<div class="sv"><div class="svl">Sòl</div><div class="svn vs" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;"><span style="color:var(--green);font-size:1.2rem;">'+(d.soil!==null?d.soil+'%':'—')+'</span><span style="color:var(--cyan);font-size:1.2rem;">'+(d.temp_suelo!=null?d.temp_suelo.toFixed(1)+'°C':'—')+'</span></div><div class="svu"></div></div>':'<div class="sv"><div class="svl">Hum.Sòl</div><div class="svn '+(d.soil!==null&&d.soil<15?'vs dry':'vs')+'">'+(d.soil!==null?d.soil:'—')+'</div><div class="svu">%</div></div>')+
       '</div>'+
       '<div class="sftr">'+
       '<span class="srisk" style="color:'+(online?acc:'var(--txt3)')+'">'+(online?'':'○ MEMÒRIA · ')+(isCrit?'⚠ CRÍTIC':isWarn?'⚠ MODERAT':'✓ NORMAL')+'</span>'+
@@ -146,7 +262,7 @@ function renderGrid(){
 }
 
 function updateNextTxCountdown(){
-  var d=nodeData[selIdx],el=document.getElementById('nextTx');if(!el)return;
+  var d=activeNodeData()[selIdx],el=document.getElementById('nextTx');if(!el)return;
   if(!d||d.temp===null||!d.rawTime){el.textContent='—';el.style.color=txtColor();el.style.textShadow='';return;}
   var remaining=OFFLINE_MS-(Date.now()-new Date(d.rawTime).getTime());
   if(remaining<=0){
@@ -162,7 +278,7 @@ function updateAllColors(){
   selNode(selIdx);
   updateMapMarkers();
   updateNextTxCountdown();
-  NODES.forEach(function(_,i){updateNodePopup(i);});
+  activeNodes().forEach(function(_,i){updateNodePopup(i);});
   renderGrid();
 }
 
@@ -216,7 +332,7 @@ function _updateStats(hist){
   }
   if(el('db-stat-count')){
     var idx=(typeof selIdx!=='undefined')?selIdx:0;
-    var d=nodeData&&nodeData[idx];
+    var d=activeNodeData()&&activeNodeData()[idx];
     var status=d?d.status:'—';
     var statusCol=status==='online'?'#00ff88':status==='offline'?'#ff1744':'#ffab40';
     el('db-stat-count').innerHTML=hist.length+' mostres &nbsp;<span style="color:'+statusCol+';text-transform:uppercase;">● '+status+'</span>';
@@ -226,7 +342,7 @@ function _updateStats(hist){
 function exportDashboardCSV(){
   var idx=(typeof selIdx!=='undefined')?selIdx:0;
   var cfg=NODES&&NODES[idx];
-  var hist=nodeData&&nodeData[idx]&&nodeData[idx].history||[];
+  var hist=activeNodeData()&&activeNodeData()[idx]&&activeNodeData()[idx].history||[];
   if(!hist.length){alert('Sense dades per exportar');return;}
   var rows=['HORA,TEMP(°C),HUM_AIRE(%),HUM_SOL(%),BAT_PCT(%),BAT_MV(mV)'];
   hist.forEach(function(r){
@@ -241,7 +357,7 @@ function exportDashboardCSV(){
 
 // ── NODE DASHBOARD ─────────────────────────────────────────────
 var _dbCharts = {};
-var _dbRange = '24h';
+var _dbRange = '7d';
 var _dbRangeLabels={'24h':'Últimes 24 hores','7d':'Últims 7 dies','30d':'Últims 30 dies','1y':'Últim any'};
 
 function openNodeDashboard(){
@@ -315,7 +431,7 @@ async function _fetchAndRender(rangeStr, dateStr){
   var idx = (typeof selIdx !== "undefined") ? selIdx : 0;
   var _rl=(_dbRangeLabels&&_dbRangeLabels[_dbRange])||'Últimes 24 hores';
   ['temp','hum','bat','soil'].forEach(function(k){
-    var names={temp:'TEMPERATURA (°C)',hum:'HUMITAT AIRE (%)',bat:'BATERIA (%)',soil:'HUMITAT SÒL (%)'};
+    var names={temp:'TEMPERATURA (°C)',hum:'HUMITAT AIRE (%)',bat:'BATERIA (%)',soil:isMeshcoreMode()?'TEMPERATURA SÒL (°C)':'HUMITAT SÒL (%)'};
     var el=document.getElementById('db-title-'+k);
     if(el){el.textContent=names[k]+' — '+_rl;el.style.fontSize='10px';}
   });
@@ -330,25 +446,31 @@ async function _fetchAndRender(rangeStr, dateStr){
   var hums   = hist.map(function(r){ return r.hum;  }).reverse();
   var bats   = hist.map(function(r){ return r.bat_pct; }).reverse();
   var soils  = hist.map(function(r){ return r.soil; }).reverse();
+  var tsoils = hist.map(function(r){ return r.temp_suelo!=null?r.temp_suelo:null; }).reverse();
   var _rangeMs={'24h':86400000,'7d':604800000,'30d':2592000000,'1y':31536000000}[rangeStr]||86400000;
   _dbChart('db-chart-temp', labels, temps, '#f0c040', '°C', _rangeMs);
   _dbChart('db-chart-hum',  labels, hums,  '#4aa8d8', '%',  _rangeMs);
   _dbChart('db-chart-bat',  labels, bats,  '#5bbf7a', '%',  _rangeMs);
-  _dbChart('db-chart-soil', labels, soils, '#d4854a', '%',  _rangeMs);
+  if(isMeshcoreMode()){
+    _dbChartDual('db-chart-soil', labels, soils, '#d4854a', 'Hum.Sòl %', tsoils, '#00bcd4', 'T.Sòl °C', _rangeMs);
+  } else {
+    _dbChart('db-chart-soil', labels, soils, '#d4854a', '%', _rangeMs);
+  }
   // Taula
   var tbl = document.getElementById('db-hist-table');
   if(tbl){
     if(!hist.length){
       tbl.innerHTML='<div style="color:rgba(0,229,255,.3);font-size:10px;padding:8px;">Sense dades per aquest rang</div>';
     } else {
-      var rows='<div class="db-hist-row db-hist-hdr"><span>HORA</span><span>TEMP</span><span>HUM AIRE</span><span>HUM SOL</span><span>BATERIA</span></div>';
+      var rows='<div class="db-hist-row db-hist-hdr"><span>DIA</span><span>HORA</span><span>TEMP</span><span>HUM AIRE</span><span>HUM SOL</span><span>BATERIA</span></div>';
       hist.forEach(function(r){
         var batCol=r.bat_pct!=null?(r.bat_pct>50?'#5bbf7a':r.bat_pct>20?'#d4a843':'#c05050'):'rgba(100,130,150,.5)';
         rows+='<div class="db-hist-row">'
+          +'<span style="color:rgba(0,229,255,.35);font-size:9px;">'+(r.date||'—')+'</span>'
           +'<span style="color:rgba(0,229,255,.55);">'+r.time+'</span>'
           +'<span style="color:#00e5ff;">'+(r.temp!=null?r.temp.toFixed(1)+'°C':'—')+'</span>'
           +'<span style="color:#00ff88;">'+(r.hum!=null?r.hum.toFixed(1)+'%':'—')+'</span>'
-          +'<span style="color:#d4854a;">'+(r.soil!=null?r.soil+'%':'—')+'</span>'
+          +'<span style="color:#d4854a;">'+(r.soil!=null?r.soil+'%':'—')+(isMeshcoreMode()&&r.temp_suelo!=null?'<span style="color:#00bcd4;">/'+r.temp_suelo.toFixed(1)+'°C</span>':'')+'</span>'
           +'<span style="color:'+batCol+';">'+(r.bat_pct!=null?r.bat_pct+'% ('+(r.bat_mv?(r.bat_mv/1000).toFixed(2)+'V':'—')+')':'—')+'</span>'
           +'</div>';
       });
@@ -367,12 +489,16 @@ function _renderDashboard(){
     var el=document.getElementById('db-title-'+k);
     if(el){el.textContent=names[k]+' — '+_rl;el.style.fontSize='10px';}
   });
-  var d   = nodeData && nodeData[idx];
-  var cfg = NODES && NODES[idx];
+  var _tsolTitleEl=document.getElementById('db-title-tsoil');
+  if(_tsolTitleEl){_tsolTitleEl.textContent='TEMPERATURA SÒL (°C) — '+_rl;_tsolTitleEl.style.fontSize='10px';}
+  var _tsolBlock=document.getElementById('db-tsoil-block');
+  if(_tsolBlock)_tsolBlock.style.display=isMeshcoreMode()?'block':'none';
+  var d   = activeNodeData() && activeNodeData()[idx];
+  var cfg = (isMeshcoreMode()?MESHCORE_NODES:NODES)[idx];
   if(!d) return;
 
   // Títol
-  document.getElementById('db-node-title').textContent = (cfg && cfg.name) || ('RAK-NODO-0'+(idx+1));
+  document.getElementById('db-node-title').textContent = (cfg && (cfg.label||cfg.name||cfg.id)) || (isMeshcoreMode()?'SENSOR-'+(idx+1):'RAK-NODO-0'+(idx+1));
 
   // KPIs
   function setVal(id, val, dec){ var e=document.getElementById(id); if(e) e.textContent = val!==null&&val!==undefined ? parseFloat(val).toFixed(dec||0) : '—'; }
@@ -428,14 +554,19 @@ function _renderDashboard(){
   var temps  = _padData.concat(sliced.map(function(r){ return r.temp !== null ? r.temp : null; }));
   var hums   = _padData.concat(sliced.map(function(r){ return r.hum  !== null ? r.hum  : null; }));
   var bats   = _padData.concat(sliced.map(function(r){ return r.bat_pct !== null ? r.bat_pct : null; }));
-  var soils  = _padData.concat(sliced.map(function(r){ return r.soil !== null ? r.soil : null; }));
+  var soils  = _padData.concat(sliced.map(function(r){ return r.soil!==null?r.soil:null; }));
+  var tsoils = _padData.concat(sliced.map(function(r){ return r.temp_suelo!=null?r.temp_suelo:null; }));
 
   _updateStats(sliced);
   var _rMs={'24h':86400000,'7d':604800000,'30d':2592000000,'1y':31536000000}[_dbRange]||86400000;
   _dbChart('db-chart-temp', labels, temps, '#f0c040', '°C', _rMs);
   _dbChart('db-chart-hum',  labels, hums,  '#4aa8d8', '%',  _rMs);
   _dbChart('db-chart-bat',  labels, bats,  '#5bbf7a', '%',  _rMs);
-  _dbChart('db-chart-soil', labels, soils, '#d4854a', '%',  _rMs);
+  if(isMeshcoreMode()){
+    _dbChartDual('db-chart-soil', labels, soils, '#d4854a', 'Hum.Sòl %', tsoils, '#00bcd4', 'T.Sòl °C', _rMs);
+  } else {
+    _dbChart('db-chart-soil', labels, soils, '#d4854a', '%', _rMs);
+  }
 
   // Taula historial
   var tbl = document.getElementById('db-hist-table');
@@ -443,14 +574,15 @@ function _renderDashboard(){
     if(!hist.length){
       tbl.innerHTML = '<div style="color:rgba(0,229,255,.3);font-size:10px;padding:8px;">Sense historial disponible</div>';
     } else {
-      var rows = '<div class="db-hist-row db-hist-hdr"><span>HORA</span><span>TEMP</span><span>HUM AIRE</span><span>HUM SÒL</span><span>BATERIA</span></div>';
+      var rows = '<div class="db-hist-row db-hist-hdr"><span>DIA</span><span>HORA</span><span>TEMP</span><span>HUM AIRE</span><span>SÒL</span><span>BATERIA</span></div>';
       hist.forEach(function(r){
         var batCol = r.bat_pct!=null?(r.bat_pct>50?'#5bbf7a':r.bat_pct>20?'#d4a843':'#c05050'):'rgba(100,130,150,.5)';
         rows += '<div class="db-hist-row">'
+          +'<span style="color:rgba(0,229,255,.35);font-size:9px;">'+(r.date||'—')+'</span>'
           +'<span style="color:rgba(0,229,255,.55);">'+r.time+'</span>'
           +'<span style="color:#f0c040;">'+(r.temp!=null?r.temp+'°C':'—')+'</span>'
           +'<span style="color:#4aa8d8;">'+(r.hum!=null?r.hum+'%':'—')+'</span>'
-          +'<span style="color:#d4854a;">'+(r.soil!=null?r.soil+'%':'—')+'</span>'
+          +'<span style="color:#d4854a;">'+(r.soil!=null?r.soil+'%':'—')+(isMeshcoreMode()&&r.temp_suelo!=null?'<span style="color:#00bcd4;">/'+r.temp_suelo.toFixed(1)+'°C</span>':'')+'</span>'
           +'<span style="color:'+batCol+';">'+(r.bat_pct!=null?r.bat_pct+'% ('+(r.bat_mv?(r.bat_mv/1000).toFixed(2)+'V':'—')+')':'—')+'</span>'
           +'</div>';
       });
@@ -459,6 +591,19 @@ function _renderDashboard(){
   }
 }
 
+function _dbChartDual(canvasId, labels, data1, color1, lbl1, data2, color2, lbl2, rangeMs){
+  var ctx = document.getElementById(canvasId);
+  if(!ctx) return;
+  if(_dbCharts[canvasId]){ _dbCharts[canvasId].destroy(); delete _dbCharts[canvasId]; }
+  var c1=ctx.getContext('2d');
+  var g1=c1.createLinearGradient(0,0,0,120);g1.addColorStop(0,color1+'33');g1.addColorStop(1,color1+'00');
+  var g2=c1.createLinearGradient(0,0,0,120);g2.addColorStop(0,color2+'33');g2.addColorStop(1,color2+'00');
+  var fmtLabels=labels.map(function(l){if(!l)return '';if(typeof l==='number'||(/^\d{10,}$/.test(String(l)))){var d=new Date(typeof l==='number'?l:parseInt(l));return d.toLocaleTimeString('ca-ES',{hour:'2-digit',minute:'2-digit'});}return String(l).substring(0,5);});
+  _dbCharts[canvasId]=new Chart(ctx.getContext('2d'),{type:'line',data:{labels:fmtLabels,datasets:[
+    {label:lbl1,data:data1,borderColor:color1,backgroundColor:g1,borderWidth:1.5,pointRadius:data1.length<10?3:0,pointBackgroundColor:color1,tension:0.4,fill:true,yAxisID:'y1'},
+    {label:lbl2,data:data2,borderColor:color2,backgroundColor:g2,borderWidth:1.5,pointRadius:data2.length<10?3:0,pointBackgroundColor:color2,tension:0.4,fill:true,yAxisID:'y2'}
+  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{display:true,labels:{color:'rgba(0,229,255,.5)',font:{size:9},boxWidth:12}},tooltip:{callbacks:{label:function(ctx){var v=ctx.parsed.y;return ctx.dataset.label+': '+(v!=null?parseFloat(v).toFixed(1):'—');}}}},scales:{x:{display:true,ticks:{color:'rgba(0,229,255,.35)',font:{size:8},maxTicksLimit:8},grid:{color:'rgba(0,229,255,.05)'}},y1:{display:true,position:'left',ticks:{color:color1,font:{size:8},callback:function(v){return v+'%';}},grid:{color:'rgba(0,229,255,.05)'}},y2:{display:true,position:'right',ticks:{color:color2,font:{size:8},callback:function(v){return parseFloat(v).toFixed(1)+'°C';}},grid:{drawOnChartArea:false}}}}});
+}
 function _dbChart(canvasId, labels, data, color, unit, rangeMs){
   var ctx = document.getElementById(canvasId);
   if(!ctx) return;

@@ -70,7 +70,7 @@ document.addEventListener('DOMContentLoaded', function(){
 </style>
 <img class="hdr-itb-esp-desktop" src="logo-itb.png" style="display:block;position:absolute;top:32px;right:32px;width:120px;filter:invert(1) sepia(1) saturate(5) hue-rotate(180deg) drop-shadow(0 0 5px rgba(0,229,255,0.5)) drop-shadow(0 0 12px rgba(0,229,255,0.25));opacity:0.9;"><div class="hdr-tag">Institut Tecnològic de Barcelona — Parc de Collserola</div><button id="techToggleBtn" onclick="toggleDataSource()" style="position:absolute;top:46px;left:32px;background:rgba(0,229,255,.1);border:2px solid rgba(0,229,255,.5);color:#00e5ff;font-family:Share Tech Mono,monospace;font-size:13px;padding:8px 18px;border-radius:4px;cursor:pointer;letter-spacing:.1em;">⇄ MESHCORE</button>
   <div class="hdr-title">Espvrna — Forest Fire Prevention</div>
-  <div class="hdr-sub" id="hdrSub" style="display:flex;align-items:center;justify-content:center;gap:16px;">LoRaWAN EU868 · ChirpStack v4 · OTAA · AES-128 · Sensor Nodes</div>
+  <div class="hdr-sub" style="display:flex;align-items:center;justify-content:center;gap:16px;">LoRaWAN EU868 · ChirpStack v4 · OTAA · AES-128 · Sensor Nodes</div>
   <div class="hdr-line"></div>
 </div>
 <div class="status-bar">
@@ -79,7 +79,6 @@ document.addEventListener('DOMContentLoaded', function(){
     <div class="si"><div class="sdot dot-g"></div><span>ChirpStack: <span id="csStatus">CONNECTING...</span></span></div>
     <div class="si"><div class="sdot dot-g" id="gwDot"></div><span>Gateway: <span id="gwStatusBar">CONNECTING...</span></span></div>
     <div class="si"><div class="sdot dot-a" id="nodeDot"></div><span>Nodes: <span id="nodeStatus">en espera...</span></span></div>
-    <div class="si"><div class="sdot dot-r" id="rpiDot"></div><span>Raspberry Pi: <span id="rpiStatus">CHECKING...</span></span></div>
   </div>
   <div style="display:flex;gap:10px;align-items:center;margin-right:8px;">
     <span id="liveClock" style="color:var(--cyan);letter-spacing:.08em;">—</span>
@@ -165,7 +164,7 @@ document.addEventListener('DOMContentLoaded', function(){
 .db-kpi-lbl{font-size:8px;letter-spacing:.2em;color:rgba(0,229,255,.7);margin-bottom:5px;}
 .db-kpi-val{font-size:26px;color:#00e5ff;line-height:1;margin-bottom:2px;font-family:Rajdhani,sans-serif;font-weight:700;}
 .db-kpi-unit{font-size:9px;color:rgba(0,229,255,.6);}
-.db-hist-row{display:grid;grid-template-columns:48px 52px 60px 65px 80px 110px;gap:6px;padding:8px 0;border-bottom:1px solid rgba(0,229,255,.05);font-size:10px;color:rgba(0,229,255,.65);}
+.db-hist-row{display:grid;grid-template-columns:60px 70px 65px 65px 145px;gap:8px;padding:8px 0;border-bottom:1px solid rgba(0,229,255,.05);font-size:10px;color:rgba(0,229,255,.65);}
 .db-hist-hdr{color:rgba(0,229,255,.65);font-size:8px;letter-spacing:.1em;border-bottom:1px solid rgba(0,229,255,.2) !important;}
 #db-date-picker::-webkit-calendar-picker-indicator{filter:invert(1) sepia(1) saturate(2) hue-rotate(160deg);opacity:.5;cursor:pointer;}
 #db-date-picker:hover{border-color:rgba(0,229,255,.35)!important;color:#00e5ff!important;}
@@ -350,11 +349,11 @@ document.addEventListener('DOMContentLoaded', function(){
   <div class="right-panel">
     <div class="card card-l-cyan">
       <div class="card-title ct-c">◈ ChirpStack v4</div>
-      <div class="drow"><span id="_rowServidorLbl">SERVIDOR</span><span class="dval" id="_rowServidor">isard.nuvulet.itb.cat</span></div>
-      <div class="drow"><span>ESTAT</span><span class="dval r" id="csGwSt">OFFLINE</span></div>
-      <div class="drow"><span id="_rowServeiLbl">ACTIVACIÓ</span><span class="dval g" id="_rowServei">OTAA · JOINED</span></div>
-      <div class="drow"><span id="_rowUptimeLbl">NODES ONLINE</span><span class="dval" id="csNodes">0 online</span></div>
-      <div class="drow"><span id="_rowDarrerLbl">LAST JOIN</span><span class="dval" id="csJoin">7/5/2026 12:53:36</span></div>
+      <div class="drow"><span>SERVIDOR</span><span class="dval">isard.nuvulet.itb.cat</span></div>
+      <div class="drow"><span>GATEWAY STATUS</span><span class="dval r" id="csGwSt">OFFLINE</span></div>
+      <div class="drow"><span>ACTIVACIÓ</span><span class="dval g">OTAA · JOINED</span></div>
+      <div class="drow"><span>NODES ONLINE</span><span class="dval" id="csNodes">—</span></div>
+      <div class="drow"><span>LAST JOIN</span><span class="dval" id="csJoin">—</span></div>
     </div>
     <div class="alert-box" id="alertBox">
       <div class="alert-ttl">⚠ ALERTA RISC D'INCENDI</div>
@@ -375,13 +374,13 @@ document.addEventListener('DOMContentLoaded', function(){
         <div class="mbig-unit">°C</div>
       </div>
       <div class="mrow">
-        <div class="mmini" id="mminiH"><div class="mmini-lbl" id="mainHLbl">Hum. Aire</div><div class="mmini-val vh" id="mainH">—</div><div class="mmini-unit" id="mainHUnit">% RH</div></div>
-        <div class="mmini" id="mminiS"><div class="mmini-lbl" id="mainSLbl">Hum. Sòl</div><div class="mmini-val vs" id="mainS">—</div><div class="mmini-unit" id="mainSUnit">% VWC</div></div>
+        <div class="mmini"><div class="mmini-lbl">Hum. Aire</div><div class="mmini-val vh" id="mainH">—</div><div class="mmini-unit">% RH</div></div>
+        <div class="mmini"><div class="mmini-lbl">Hum. Sòl</div><div class="mmini-val vs" id="mainS">—</div><div class="mmini-unit">% VWC</div></div>
       </div>
       <div class="drow" style="padding:4px 0;"><span>ESTAT</span><span class="dval" id="riskSt">—</span></div>
       <div class="drow" style="padding:4px 0;"><span>UBICACIÓ</span><span class="dval" id="nodeCoords" style="font-size:8px;">—</span></div>
       <div class="drow" style="padding:4px 0;"><span>ÚLTIMA DADA FA</span><span class="dval" id="lastSeen">—</span></div>
-      <div class="drow" style="padding:4px 0;"><span>RISC</span><span class="dval" id="fCnt">—</span></div>
+      <div class="drow" style="padding:4px 0;"><span>FRAME COUNT</span><span class="dval" id="fCnt">—</span></div>
       <div class="drow" style="padding:4px 0;"><span>BATERIA</span><span class="dval" id="batPct">—</span></div>
       <div class="drow" style="padding:4px 0;"><span>PROPER ENVIAMENT</span><span class="dval" id="nextTx">—</span></div>
     </div>
@@ -399,18 +398,17 @@ document.addEventListener('DOMContentLoaded', function(){
 <div class="sensor-section">
   <div class="sec-hdr">
     <h2>Telemetria en Viu</h2>
-    <span class="sec-sub" id="secSub">— EU868 / ACTUALITZACIÓ: 1h</span>
+    <span class="sec-sub">— EU868 / ACTUALITZACIÓ: 1h</span>
     <div class="live-dot" style="margin-left:auto;"></div>
   </div>
   <div class="sgrid" id="sgrid"></div>
 </div>
 <div class="specs">
-  <div class="spec" id="specFreq"><div class="spec-lbl">Freqüència</div><div class="spec-val">868 <span class="spec-unit">MHz</span></div></div>
-  <div class="spec" id="specProto"><div class="spec-lbl">Protocol</div><div class="spec-val" id="specProtoVal" style="font-size:12px;">LoRaWAN</div></div>
-  <div class="spec" id="specActiv"><div class="spec-lbl">Activació</div><div class="spec-val" id="specActivVal" style="font-size:12px;">OTAA</div></div>
-  <div class="spec" id="specEnv"><div class="spec-lbl">Enviament</div><div class="spec-val" id="specEnvVal" style="font-size:12px;">1h <span class="spec-unit">int</span></div></div>
-  <div class="spec" id="specPayload"><div class="spec-lbl">Payload</div><div class="spec-val" id="specPayloadVal" style="font-size:12px;">7 <span class="spec-unit">bytes</span></div></div>
-  <div class="spec" id="specMeshExtra" style="display:none;"><div class="spec-lbl">Bridge</div><div class="spec-val" style="font-size:11px;">RPi · MQTT</div></div>
+  <div class="spec"><div class="spec-lbl">Freqüència</div><div class="spec-val">868 <span class="spec-unit">MHz</span></div></div>
+  <div class="spec"><div class="spec-lbl">Protocol</div><div class="spec-val" style="font-size:12px;">LoRaWAN</div></div>
+  <div class="spec"><div class="spec-lbl">Activació</div><div class="spec-val" style="font-size:12px;">OTAA</div></div>
+  <div class="spec"><div class="spec-lbl">Enviament</div><div class="spec-val" style="font-size:12px;">1h <span class="spec-unit">int</span></div></div>
+  <div class="spec"><div class="spec-lbl">Payload</div><div class="spec-val">7 <span class="spec-unit">bytes</span></div></div>
 </div>
 <div class="btm">
   <span>Projecte Espurna · EspVRna · ITB ASIX2c 2025/2026</span>
@@ -453,51 +451,6 @@ document.addEventListener('DOMContentLoaded', function(){
   </div>
   <div style="margin-top:10px;font-size:8px;color:rgba(0,229,255,.35);text-align:center;">Els enllaços entre nodes es calculen automàticament</div>
 </div>
-<script>
-// ── RASPBERRY PI MONITOR ───────────────────────────────────
-var _rpiLastOk=null,_rpiUpSince=null;
-async function checkRPi(){
-  var dot=document.getElementById('rpiDot');
-  var st=document.getElementById('rpiStatus');
-  var RPI_PING=window.location.origin+'/rpi-ping';
-  var now=new Date();
-  var inMC=typeof isMeshcoreMode==='function'&&isMeshcoreMode();
-  try{
-    var t0=Date.now();
-    var _resp=await fetch(RPI_PING+'?_t='+t0,{method:'GET',cache:'no-store',signal:AbortSignal.timeout(5000)});
-    if(!_resp.ok)throw new Error('not ok');
-    var ms=Date.now()-t0;
-    if(!_rpiUpSince)_rpiUpSince=now;
-    _rpiLastOk=now;
-    dot.className='sdot dot-g';st.textContent='ONLINE';
-    if(inMC){
-      var gwSt=document.getElementById('csGwSt');
-      var upEl=document.getElementById('csNodes');
-      var pingEl=document.getElementById('csJoin');
-      if(gwSt){gwSt.textContent='● ONLINE';gwSt.style.color='var(--green)';}
-      if(pingEl)pingEl.textContent=now.toLocaleTimeString('ca-ES')+' ('+ms+'ms)';
-      if(upEl&&_rpiUpSince){
-        var s=Math.floor((now-_rpiUpSince)/1000);
-        var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=s%60;
-        upEl.textContent=(h?h+'h ':'')+m+'m '+ss+'s';
-      }
-    }
-  }catch(e){
-    _rpiUpSince=null;
-    dot.className='sdot dot-r';st.textContent='OFFLINE';
-    if(inMC){
-      var gwSt2=document.getElementById('csGwSt');
-      var upEl2=document.getElementById('csNodes');
-      var pingEl2=document.getElementById('csJoin');
-      if(gwSt2){gwSt2.textContent='○ OFFLINE';gwSt2.style.color='var(--red)';}
-      if(upEl2)upEl2.textContent='—';
-      if(pingEl2)pingEl2.textContent=_rpiLastOk?_rpiLastOk.toLocaleTimeString('ca-ES'):'—';
-    }
-  }
-}
-setTimeout(checkRPi,2000);
-setInterval(checkRPi,30000);
-</script>
 <script src="js/rf_buildings.js"></script>
 <script src="js/rf_multi.js"></script>
 <script src="js/rf_coverage.js"></script>

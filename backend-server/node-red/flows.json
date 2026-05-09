@@ -1,177 +1,271 @@
 [
-    {
-        "id": "flow-main-001",
-        "type": "tab",
-        "label": "Flow 1 - Meshtastic to InfluxDB",
-        "disabled": false,
-        "info": "",
-        "env": []
-    },
-    {
-        "id": "mqtt-in-node-001",
-        "type": "mqtt in",
-        "z": "flow-main-001",
-        "name": "MQTT JSON in",
-        "topic": "meshtastic/mesh/collserola/message",
-        "qos": "1",
-        "datatype": "auto",
-        "broker": "mqtt-broker-tls-001",
-        "nl": false,
-        "rap": true,
-        "rh": 0,
-        "inputs": 0,
-        "x": 100,
-        "y": 100,
-        "wires": [
-            [
-                "parse-json-node-001"
-            ]
-        ]
-    },
-    {
-        "id": "parse-json-node-001",
-        "type": "json",
-        "z": "flow-main-001",
-        "name": "Parse JSON",
-        "property": "payload",
-        "action": "obj",
-        "pretty": false,
-        "x": 300,
-        "y": 100,
-        "wires": [
-            [
-                "debug-json-001",
-                "validate-data-func"
-            ]
-        ]
-    },
-    {
-        "id": "validate-data-func",
-        "type": "function",
-        "z": "flow-main-001",
-        "name": "Validate & Transform",
-        "func": "// Extraer valores originales\nconst temp = msg.payload.temperature;\nconst hum = msg.payload.humidity;\nconst pres = msg.payload.pressure;\n\n// Validar\nif (!temp || !hum || !pres) {\n    return null;\n}\n\n// ⚠️ FORMATO CORRECTO: Objeto con propiedad \"data\"\nmsg.payload = {\n    // Opcional - ya está configurado en el nodo\n    // bucket: 'sensor_data',\n    // precision: 'ns',\n    \n    // ✅ LA CLAVE ES ESTA PROPIEDAD \"data\"\n    data: [{\n        measurement: \"collserola_sensors\",\n        fields: {\n            temperature: Number(temp),\n            humidity: Number(hum),\n            pressure: Number(pres)\n        },\n        tags: {\n            location: \"collserola\",\n            source: \"meshtastic\"\n        }\n    }]\n};\n\nreturn msg;",
-        "outputs": 1,
-        "timeout": 0,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 530,
-        "y": 100,
-        "wires": [
-            [
-                "influxdb-stackhero-write",
-                "ae2af6565dbcb05e"
-            ]
-        ]
-    },
-    {
-        "id": "influxdb-stackhero-write",
-        "type": "Stackhero-InfluxDB-v2-write",
-        "z": "flow-main-001",
-        "server": "influxdb-stackhero-config",
-        "name": "Write to InfluxDB",
-        "x": 270,
-        "y": 420,
-        "wires": [
-            [
-                "debug-success"
-            ]
-        ]
-    },
-    {
-        "id": "debug-json-001",
-        "type": "debug",
-        "z": "flow-main-001",
-        "name": "Debug JSON Raw",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "payload",
-        "targetType": "msg",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 320,
-        "y": 200,
-        "wires": []
-    },
-    {
-        "id": "debug-success",
-        "type": "debug",
-        "z": "flow-main-001",
-        "name": "Debug InfluxDB Response",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "true",
-        "targetType": "full",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 540,
-        "y": 420,
-        "wires": []
-    },
-    {
-        "id": "ae2af6565dbcb05e",
-        "type": "debug",
-        "z": "flow-main-001",
-        "name": "Debug Transformed",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "payload",
-        "targetType": "msg",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 620,
-        "y": 320,
-        "wires": []
-    },
-    {
-        "id": "mqtt-broker-tls-001",
-        "type": "mqtt-broker",
-        "name": "MQTT Broker TLS",
-        "broker": "mqtt-broker",
-        "port": "8883",
-        "tls": "mqtt-tls-config",
-        "clientid": "node-red-iot",
-        "autoConnect": true,
-        "usetls": true,
-        "protocolVersion": "4",
-        "keepalive": 60,
-        "cleansession": true,
-        "autoUnsubscribe": true,
-        "birthTopic": "meshtastic/mesh/collserola/node-red/status",
-        "birthQos": "1",
-        "birthPayload": "{\"status\":\"online\",\"timestamp\":\"2026-01-27T12:00:00Z\",\"service\":\"node-red\"}",
-        "birthMsg": {},
-        "closeTopic": "meshtastic/mesh/collserola/node-red/status",
-        "closeQos": "1",
-        "closePayload": "{\"status\":\"offline\"}",
-        "closeMsg": {},
-        "willTopic": "meshtastic/mesh/collserola/node-red/status",
-        "willQos": "1",
-        "willPayload": "{\"status\":\"offline\",\"reason\":\"connection_lost\"}",
-        "willMsg": {},
-        "userProps": "",
-        "sessionExpiry": ""
-    },
-    {
-        "id": "mqtt-tls-config",
-        "type": "tls-config",
-        "name": "MQTT TLS",
-        "cert": "",
-        "key": "",
-        "ca": "/data/certs/ca.crt",
-        "certname": "",
-        "keyname": "",
-        "caname": "ca.crt",
-        "servername": "mqtt-broker",
-        "verifyservercert": true,
-        "alpnprotocol": ""
-    }
+  {
+    "id": "flow-main-001",
+    "type": "tab",
+    "label": "Flow 1 - Meshtastic to InfluxDB",
+    "disabled": false,
+    "info": "",
+    "env": []
+  },
+  {
+    "id": "mqtt-in-node-001",
+    "type": "mqtt in",
+    "z": "flow-main-001",
+    "name": "MQTT JSON in",
+    "topic": "meshtastic/mesh/collserola/message",
+    "qos": "1",
+    "datatype": "auto",
+    "broker": "mqtt-broker-tls-001",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 100,
+    "y": 100,
+    "wires": [
+      [
+        "parse-json-node-001"
+      ]
+    ]
+  },
+  {
+    "id": "parse-json-node-001",
+    "type": "json",
+    "z": "flow-main-001",
+    "name": "Parse JSON",
+    "property": "payload",
+    "action": "obj",
+    "pretty": false,
+    "x": 300,
+    "y": 100,
+    "wires": [
+      [
+        "debug-json-001",
+        "validate-data-func"
+      ]
+    ]
+  },
+  {
+    "id": "validate-data-func",
+    "type": "function",
+    "z": "flow-main-001",
+    "name": "Validate & Transform",
+    "func": "// Extraer valores originales\nconst temp = msg.payload.temperature;\nconst hum = msg.payload.humidity;\nconst pres = msg.payload.pressure;\n\n// Validar\nif (!temp || !hum || !pres) {\n    return null;\n}\n\n// \u26a0\ufe0f FORMATO CORRECTO: Objeto con propiedad \"data\"\nmsg.payload = {\n    // Opcional - ya est\u00e1 configurado en el nodo\n    // bucket: 'sensor_data',\n    // precision: 'ns',\n    \n    // \u2705 LA CLAVE ES ESTA PROPIEDAD \"data\"\n    data: [{\n        measurement: \"collserola_sensors\",\n        fields: {\n            temperature: Number(temp),\n            humidity: Number(hum),\n            pressure: Number(pres)\n        },\n        tags: {\n            location: \"collserola\",\n            source: \"meshtastic\"\n        }\n    }]\n};\n\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 530,
+    "y": 100,
+    "wires": [
+      [
+        "influxdb-stackhero-write",
+        "ae2af6565dbcb05e"
+      ]
+    ]
+  },
+  {
+    "id": "influxdb-stackhero-write",
+    "type": "Stackhero-InfluxDB-v2-write",
+    "z": "flow-main-001",
+    "server": "influxdb-stackhero-config",
+    "name": "Write to InfluxDB",
+    "x": 270,
+    "y": 420,
+    "wires": [
+      [
+        "debug-success"
+      ]
+    ]
+  },
+  {
+    "id": "debug-json-001",
+    "type": "debug",
+    "z": "flow-main-001",
+    "name": "Debug JSON Raw",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 320,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "debug-success",
+    "type": "debug",
+    "z": "flow-main-001",
+    "name": "Debug InfluxDB Response",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 540,
+    "y": 420,
+    "wires": []
+  },
+  {
+    "id": "ae2af6565dbcb05e",
+    "type": "debug",
+    "z": "flow-main-001",
+    "name": "Debug Transformed",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 620,
+    "y": 320,
+    "wires": []
+  },
+  {
+    "id": "mqtt-broker-tls-001",
+    "type": "mqtt-broker",
+    "name": "MQTT Broker TLS",
+    "broker": "mqtt-broker",
+    "port": "8883",
+    "tls": "mqtt-tls-config",
+    "clientid": "node-red-iot",
+    "autoConnect": true,
+    "usetls": true,
+    "protocolVersion": "4",
+    "keepalive": 60,
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "meshtastic/mesh/collserola/node-red/status",
+    "birthQos": "1",
+    "birthPayload": "{\"status\":\"online\",\"timestamp\":\"2026-01-27T12:00:00Z\",\"service\":\"node-red\"}",
+    "birthMsg": {},
+    "closeTopic": "meshtastic/mesh/collserola/node-red/status",
+    "closeQos": "1",
+    "closePayload": "{\"status\":\"offline\"}",
+    "closeMsg": {},
+    "willTopic": "meshtastic/mesh/collserola/node-red/status",
+    "willQos": "1",
+    "willPayload": "{\"status\":\"offline\",\"reason\":\"connection_lost\"}",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "mqtt-tls-config",
+    "type": "tls-config",
+    "name": "MQTT TLS",
+    "cert": "",
+    "key": "",
+    "ca": "/data/certs/ca.crt",
+    "certname": "",
+    "keyname": "",
+    "caname": "ca.crt",
+    "servername": "mqtt-broker",
+    "verifyservercert": true,
+    "alpnprotocol": ""
+  },
+  {
+    "id": "tab-chirpstack",
+    "type": "tab",
+    "label": "ChirpStack \u2192 InfluxDB",
+    "disabled": false,
+    "info": ""
+  },
+  {
+    "id": "chirp-mqtt-broker-cfg",
+    "type": "mqtt-broker",
+    "name": "chirpstack-mqtt",
+    "broker": "chirpstack-mqtt",
+    "port": "1883",
+    "clientid": "nodered-espurna",
+    "usetls": false,
+    "compatmode": false,
+    "keepalive": "60",
+    "cleansession": true
+  },
+  {
+    "id": "influx-cfg",
+    "type": "influxdb",
+    "hostname": "influxdb",
+    "port": "8086",
+    "protocol": "http",
+    "database": "sensor_data",
+    "name": "InfluxDB Espurna",
+    "usetls": false,
+    "tls": "",
+    "influxdbVersion": "2.0",
+    "url": "http://influxdb:8086",
+    "rejectUnauthorized": false
+  },
+  {
+    "id": "chirp-mqtt-in",
+    "type": "mqtt in",
+    "z": "tab-chirpstack",
+    "name": "ChirpStack uplink",
+    "topic": "eu868/application/+/device/+/event/up",
+    "qos": "1",
+    "datatype": "auto",
+    "broker": "chirp-mqtt-broker-cfg",
+    "x": 140,
+    "y": 100,
+    "wires": [
+      [
+        "chirp-parse"
+      ]
+    ]
+  },
+  {
+    "id": "chirp-parse",
+    "type": "function",
+    "z": "tab-chirpstack",
+    "name": "Parse & decode",
+    "func": "\nvar payload = msg.payload;\nif (typeof payload === 'string') {\n    try { payload = JSON.parse(payload); } catch(e) { node.warn('JSON parse error'); return null; }\n}\n\nvar obj = payload.object;\nif (!obj) { node.warn('No decoded object'); return null; }\n\nvar devEui = payload.deviceInfo ? payload.deviceInfo.devEui : 'unknown';\nvar appName = payload.deviceInfo ? payload.deviceInfo.applicationName : 'unknown';\n\nmsg.payload = [\n    {\n        temperatura:     parseFloat(obj.temperatura || obj.temperature || 0),\n        humedad_suelo:   parseFloat(obj.humedad_suelo || obj.humidity || 0),\n        co2:             parseFloat(obj.co2 || 0),\n        humo:            parseFloat(obj.humo || obj.smoke || 0),\n        bateria:         parseFloat(obj.bateria || obj.battery || 0)\n    },\n    {\n        node:    devEui,\n        app:     appName\n    }\n];\n\nreturn msg;\n",
+    "x": 340,
+    "y": 100,
+    "wires": [
+      [
+        "chirp-debug",
+        "chirp-influx"
+      ]
+    ]
+  },
+  {
+    "id": "chirp-debug",
+    "type": "debug",
+    "z": "tab-chirpstack",
+    "name": "Debug",
+    "active": true,
+    "tosidebar": true,
+    "x": 540,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "chirp-influx",
+    "type": "influxdb out",
+    "z": "tab-chirpstack",
+    "name": "\u2192 InfluxDB",
+    "influxdb": "influx-cfg",
+    "measurement": "espurna_sensors",
+    "precision": "",
+    "retentionPolicy": "",
+    "database": "sensor_data",
+    "precisionV18FluxV20": "ms",
+    "retentionPolicyV18Flux": "",
+    "org": "ProjecteEspVRna",
+    "bucket": "sensor_data",
+    "x": 540,
+    "y": 140,
+    "wires": []
+  }
 ]
