@@ -1,8 +1,8 @@
-# 08 – Dashboard Web EspVRna/FireSense
+# 08 – Dashboard Web EspVRna
 
 ## Descripció general
 
-El dashboard web és la interfície principal del sistema FireSense. Permet als operadors (Bombers de la Generalitat, gestors del Parc de Collserola) monitoritzar en temps real l'estat de tots els nodes sensor, visualitzar dades històriques i detectar riscos d'incendi.
+El dashboard web és la interfície principal del sistema Espvrna. Permet als operadors (Bombers de la Generalitat, gestors del Parc de Collserola) monitoritzar en temps real l'estat de tots els nodes sensor, visualitzar dades històriques i detectar riscos d'incendi.
 
 **URL pública:** `https://f0929359-581e-4924-906b.353de71f3930.isard.nuvulet.itb.cat/Espvrna/`
 
